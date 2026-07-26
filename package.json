@@ -1,0 +1,24 @@
+{
+  "name": "txtgrph-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter web-ui dev",
+    "build": "pnpm --recursive build",
+    "test": "pnpm --recursive test",
+    "lint": "pnpm --recursive lint",
+    "format": "prettier --write .",
+    "check": "pnpm --recursive check"
+  },
+  "devDependencies": {
+    "eslint": "^9.20.0",
+    "eslint-plugin-svelte": "^2.46.0",
+    "prettier": "^3.5.0",
+    "prettier-plugin-svelte": "^3.3.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}
