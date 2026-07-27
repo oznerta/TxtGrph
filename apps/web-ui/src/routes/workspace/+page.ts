@@ -16,17 +16,16 @@ export const load: PageLoad = async () => {
     };
   }
 
-  // Fetch Folders for User
+  // Fetch Folders for User (both active and trashed)
   const { data: foldersData } = await supabase
     .from('folders')
     .select('*')
     .order('created_at', { ascending: true });
 
-  // Fetch Diagrams for User
+  // Fetch Diagrams for User (both active and trashed)
   const { data: diagramsData } = await supabase
     .from('diagrams')
     .select('*')
-    .eq('is_deleted', false)
     .order('updated_at', { ascending: false });
 
   const folders: Folder[] = (foldersData || []).map((f) => ({
@@ -34,6 +33,8 @@ export const load: PageLoad = async () => {
     userId: f.user_id,
     parentId: f.parent_id,
     name: f.name,
+    isDeleted: f.is_deleted || false,
+    deletedAt: f.deleted_at || null,
     createdAt: f.created_at,
     updatedAt: f.updated_at
   }));
@@ -45,7 +46,11 @@ export const load: PageLoad = async () => {
     title: d.title,
     code: d.code,
     config: d.config || {},
-    isDeleted: d.is_deleted,
+    isShared: d.is_shared || false,
+    shareToken: d.share_token || null,
+    shareUpdatedAt: d.share_updated_at || null,
+    isDeleted: d.is_deleted || false,
+    deletedAt: d.deleted_at || null,
     createdAt: d.created_at,
     updatedAt: d.updated_at
   }));
@@ -56,3 +61,4 @@ export const load: PageLoad = async () => {
     diagrams
   };
 };
+
