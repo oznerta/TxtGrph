@@ -1,8 +1,11 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function copyBrandAssetsPlugin() {
   return {
@@ -25,5 +28,12 @@ function copyBrandAssetsPlugin() {
 
 export default defineConfig({
   envDir: '../../',
+  resolve: {
+    alias: {
+      '@txtgrph/ai-router': path.resolve(__dirname, '../../packages/ai-router/src/index.ts'),
+      '@txtgrph/core': path.resolve(__dirname, '../../packages/core/src/index.ts'),
+      '@txtgrph/config': path.resolve(__dirname, '../../packages/config/src/index.ts'),
+    },
+  },
   plugins: [copyBrandAssetsPlugin(), tailwindcss(), sveltekit()],
 });
