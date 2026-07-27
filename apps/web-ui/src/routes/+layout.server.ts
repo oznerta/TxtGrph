@@ -1,8 +1,15 @@
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
-  const { session } = await locals.safeGetSession();
-  return {
-    session,
-  };
+  try {
+    const { session } = (await locals.safeGetSession?.()) || { session: null };
+    return {
+      session,
+    };
+  } catch (err) {
+    console.error('+layout.server load error:', err);
+    return {
+      session: null,
+    };
+  }
 };

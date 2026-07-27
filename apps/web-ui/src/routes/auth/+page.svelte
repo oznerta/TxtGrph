@@ -52,13 +52,25 @@
   }
 </script>
 
-<div class="flex items-center justify-center min-h-screen p-4 bg-[--color-surface-app]">
-  <div class="w-full max-w-md p-6 sm:p-8 rounded-[8px] bg-[--color-surface-card] border border-[--color-border-default] shadow-sm space-y-6">
+<div class="flex items-center justify-center min-h-screen p-4 bg-[var(--color-surface-app)]">
+  <div class="w-full max-w-md p-6 sm:p-8 rounded-[8px] bg-[var(--color-surface-card)] border border-[var(--color-border-default)] shadow-sm space-y-6">
     <div class="text-center space-y-2">
-      <h2 class="font-['Instrument_Sans',sans-serif] text-[22px] font-semibold text-[--color-text-primary]">
+      <div class="w-10 h-10 mx-auto rounded-[8px] flex items-center justify-center overflow-hidden">
+        <img
+          src="/assets/logo-short-light.png"
+          alt="TxtGrph Logo"
+          class="w-full h-full object-contain dark:hidden"
+        />
+        <img
+          src="/assets/logo-short-dark.png"
+          alt="TxtGrph Logo"
+          class="w-full h-full object-contain hidden dark:block"
+        />
+      </div>
+      <h2 class="font-['Instrument_Sans',sans-serif] text-[22px] font-semibold text-[var(--color-text-primary)]">
         {isSignUp ? 'Create Account' : 'Welcome Back'}
       </h2>
-      <p class="text-[13px] text-[--color-text-secondary]">
+      <p class="text-[13px] text-[var(--color-text-secondary)]">
         Sign in to manage and edit your Mermaid diagrams
       </p>
     </div>
@@ -71,7 +83,7 @@
 
     <form onsubmit={handleSubmit} class="space-y-4">
       <div class="space-y-1 text-left">
-        <label for="email-input" class="block text-[13px] font-semibold text-[--color-text-primary]">
+        <label for="email-input" class="block text-[13px] font-semibold text-[var(--color-text-primary)]">
           Email address
         </label>
         <input
@@ -80,13 +92,13 @@
           bind:value={email}
           required
           placeholder="developer@example.com"
-          class="w-full h-9 px-3 text-[14px] rounded-[5px] bg-[--color-surface-subtle] border border-[--color-border-strong] text-[--color-text-primary] placeholder:[--color-text-muted] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[--color-brass] focus-visible:ring-offset-2"
+          class="w-full h-9 px-3 text-[14px] rounded-[5px] bg-[var(--color-surface-subtle)] border border-[var(--color-border-strong)] text-[var(--color-text-primary)] placeholder:[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brass)] focus-visible:ring-offset-2"
         />
       </div>
 
       {#if authMode === 'password'}
         <div class="space-y-1 text-left">
-          <label for="password-input" class="block text-[13px] font-semibold text-[--color-text-primary]">
+          <label for="password-input" class="block text-[13px] font-semibold text-[var(--color-text-primary)]">
             Password
           </label>
           <input
@@ -95,7 +107,7 @@
             bind:value={password}
             required={authMode === 'password'}
             placeholder="••••••••"
-            class="w-full h-9 px-3 text-[14px] rounded-[5px] bg-[--color-surface-subtle] border border-[--color-border-strong] text-[--color-text-primary] placeholder:[--color-text-muted] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[--color-brass] focus-visible:ring-offset-2"
+            class="w-full h-9 px-3 text-[14px] rounded-[5px] bg-[var(--color-surface-subtle)] border border-[var(--color-border-strong)] text-[var(--color-text-primary)] placeholder:[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brass)] focus-visible:ring-offset-2"
           />
         </div>
       {/if}
@@ -103,20 +115,20 @@
       <button
         type="submit"
         disabled={loading}
-        class="w-full h-10 text-[14px] font-medium rounded-[5px] bg-[--color-ink] text-[#FAF9F6] shadow-sm hover:opacity-95 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[--color-brass] focus-visible:ring-offset-2"
+        class="w-full h-10 text-[14px] font-medium rounded-[5px] bg-[var(--color-ink)] text-[#FAF9F6] shadow-sm hover:opacity-95 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brass)] focus-visible:ring-offset-2"
       >
         {loading ? 'Processing...' : authMode === 'magic-link' ? 'Send Magic Link' : isSignUp ? 'Sign Up' : 'Sign In'}
       </button>
     </form>
 
-    <div class="pt-4 border-t border-[--color-border-default] flex flex-col gap-2 text-[13px]">
+    <div class="pt-4 border-t border-[var(--color-border-default)] flex flex-col gap-2 text-[13px]">
       <button
         type="button"
         onclick={() => {
           authMode = authMode === 'password' ? 'magic-link' : 'password';
           message = null;
         }}
-        class="text-[--color-brass-text] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[--color-brass]"
+        class="text-[var(--color-brass-text)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brass)]"
       >
         {authMode === 'password' ? 'Use Magic Link instead' : 'Use Password instead'}
       </button>
@@ -128,7 +140,7 @@
             isSignUp = !isSignUp;
             message = null;
           }}
-          class="text-[--color-text-secondary] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[--color-brass]"
+          class="text-[var(--color-text-secondary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brass)]"
         >
           {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
         </button>

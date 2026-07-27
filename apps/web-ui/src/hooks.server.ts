@@ -21,25 +21,37 @@ try {
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
-  event.locals.supabase = createSupabaseServerClient(event);
+  try {
+    event.locals.supabase = createSupabaseServerClient(event);
+  } catch (err) {
+    console.error('Supabase server client init error:', err);
+  }
 
   event.locals.safeGetSession = async () => {
-    const {
-      data: { session },
-    } = await event.locals.supabase.auth.getSession();
-    if (!session) {
+    try {
+      if (!event.locals.supabase) {
+        return { session: null, user: null };
+      }
+      const {
+        data: { session },
+      } = await event.locals.supabase.auth.getSession();
+      if (!session) {
+        return { session: null, user: null };
+      }
+
+      const {
+        data: { user },
+        error,
+      } = await event.locals.supabase.auth.getUser();
+      if (error) {
+        return { session: null, user: null };
+      }
+
+      return { session, user };
+    } catch (err) {
+      console.error('safeGetSession error:', err);
       return { session: null, user: null };
     }
-
-    const {
-      data: { user },
-      error,
-    } = await event.locals.supabase.auth.getUser();
-    if (error) {
-      return { session: null, user: null };
-    }
-
-    return { session, user };
   };
 
   return resolve(event, {
