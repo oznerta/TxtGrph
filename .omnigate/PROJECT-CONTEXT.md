@@ -57,13 +57,13 @@ Never store secrets here. Use placeholders such as `<HOSTING_RESOURCE>`, `<DATAB
 
 ##### Feature: `Project scaffold, config, and auth`
 
-- [ ] Stand up the Vercel project + Supabase project (100% free tier on both), wire env vars for each
+- [x] Stand up the Vercel project + Supabase project (100% free tier on both), wire env vars for each
   - Validation commands: `<ASK_DEVELOPER>`
   - Success criteria: a "hello world" deploy is live on a `.vercel.app` URL with a working Supabase connection
-- [ ] Build the config schema + loader (fails boot on schema validation failure; no silent fallback for security-relevant fields)
+- [x] Build the config schema + loader (fails boot on schema validation failure; no silent fallback for security-relevant fields)
   - Validation commands: `<AUTO_DETECT>`
   - Success criteria: process refuses to boot on schema validation failure, with a field-level error message
-- [ ] Implement Home page, Auth page (Supabase Auth), and empty Workspace shell
+- [x] Implement Home page, Auth page (Supabase Auth), and empty Workspace shell
   - Validation commands: `<AUTO_DETECT>`
   - Success criteria: a user can land on Home, sign up/sign in, and reach an authenticated Workspace route
 
