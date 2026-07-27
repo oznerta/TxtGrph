@@ -51,23 +51,30 @@ Never store secrets here. Use placeholders such as `<HOSTING_RESOURCE>`, `<DATAB
 
 ## 3. Current Sprint Tasks
 
-### Sprint: `Sprint 1 — Foundation` (dates: `<ASK_DEVELOPER>`)
+### Sprint: `Sprint 2 — Workspace & Folders` (dates: `<ASK_DEVELOPER>`)
 
 #### Module: `Core Platform`
 
-##### Feature: `Project scaffold, config, and auth`
+##### Feature: `Live Mermaid Editor & Folder Tree Management`
 
-- [ ] Stand up the Vercel project + Supabase project (100% free tier on both), wire env vars for each
-  - Validation commands: `<ASK_DEVELOPER>`
-  - Success criteria: a "hello world" deploy is live on a `.vercel.app` URL with a working Supabase connection
-- [ ] Build the config schema + loader (fails boot on schema validation failure; no silent fallback for security-relevant fields)
+- [ ] Build CodeMirror 6 source editor + live client-side diagram preview (`mermaid.js` 11.4) in Workspace
   - Validation commands: `<AUTO_DETECT>`
-  - Success criteria: process refuses to boot on schema validation failure, with a field-level error message
-- [ ] Implement Home page, Auth page (Supabase Auth), and empty Workspace shell
+  - Success criteria: typing Mermaid syntax in the CodeMirror editor updates the live rendered diagram preview client-side without full page reload or server render round-trips
+- [ ] Create `FOLDERS` and `DIAGRAMS` database schemas & RLS policies in Supabase
   - Validation commands: `<AUTO_DETECT>`
-  - Success criteria: a user can land on Home, sign up/sign in, and reach an authenticated Workspace route
+  - Success criteria: authenticated users can create, read, update, and soft-delete diagrams and nested folders scoped strictly to their `auth.uid()`
+- [ ] Implement folder tree sidebar navigation & diagram persistence in `apps/web-ui`
+  - Validation commands: `<AUTO_DETECT>`
+  - Success criteria: diagrams and folders persist in Supabase and can be navigated, organized in folders, edited, and previewed in the Workspace
 
-*(Later sprints follow the build order in §8 — Workspace editor + live preview, folders, BYOK AI router, Settings, share links, then MCP Server + Public API.)*
+---
+
+### Completed Sprints
+
+#### Sprint: `Sprint 1 — Foundation`
+- [x] Stand up the Vercel project + Supabase project (100% free tier on both), wire env vars for each
+- [x] Build the config schema + loader (fails boot on schema validation failure; no silent fallback for security-relevant fields)
+- [x] Implement Home page, Auth page (Supabase Auth), and empty Workspace shell
 
 ---
 
@@ -430,10 +437,16 @@ gantt
 - **[ADR-008] Stack picked to fit free-tier bandwidth/compute limits**: SvelteKit + Svelte 5, TailwindCSS v4, and modular CodeMirror 6 minimize client JS/CSS payload against Vercel's bandwidth cap and Supabase's egress cap. pnpm minimizes serverless function bundle size. Node.js 24.x (Active LTS) is the target runtime.
 - **[ADR-009] mermaid.js requires ongoing sanitization discipline**: mermaid.js has a history of CSS-injection/DOM-escape issues via config-driven strings (`themeCSS`, `fontFamily`, `altFontFamily`). Diagram source comes from both users and BYOK AI generation — never pass user/AI-supplied strings into mermaid's config/theming options unsanitized. Keep mermaid patched.
 - **[ADR-010] Open source, non-commercial**: Public repo, no monetization planned. Fits Vercel Hobby's personal/non-commercial ToS as-is. License, `CONTRIBUTING.md`, and issue/PR templates still open (see §20).
+- **[ADR-011] Playground floating panels are mutually exclusive**: Only one floating panel (Code Editor, Canvas Actions menu, or any toolbar popover — theme/direction/layout) can be open at a time. Opening any panel auto-closes all others. Applies on both mobile and desktop. Enforced in `toggleToolbarPopover()`, the actions button click handler, and the Code Editor expand button.
 
 ### Gotchas & Lessons Learned
 
-*(No entries yet — project has not started implementation. Items below are anticipated risk areas to verify during build.)*
-
-- **[Watch] Supabase free-project pausing**: confirm the keep-alive ping actually prevents pausing once traffic is low (e.g. a quiet week).
-- **[Watch] Client-side export fidelity**: verify mermaid.js's client-side PNG/SVG export handles large/complex diagrams acceptably across browsers before relying on it as the sole export path.
+- **[Gotcha] pnpm v10 `onlyBuiltDependencies`**: In pnpm v10+, build scripts for native/binary packages (`esbuild`) must be explicitly authorized under `onlyBuiltDependencies:` and `allowBuilds:` inside `pnpm-workspace.yaml` (rather than root `package.json`).
+- **[Gotcha] SvelteKit Vercel Adapter Runtime on Node 24**: On Node 24.x local runtimes, `@sveltejs/adapter-vercel` requires setting `runtime: 'nodejs22.x'` or using `@sveltejs/adapter-auto` for local build compatibility.
+- **[Gotcha] SvelteKit Environment Variable Prefixing**: Client-accessible environment variables strictly require the `PUBLIC_` prefix (`PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_ANON_KEY`) and must be imported from `$env/static/public`. Server-only secrets (`SUPABASE_SERVICE_ROLE_KEY`, `VAULT_ROOT_KEY`) stay unprefixed and are imported from `$env/static/private`.
+- **[Watch] Supabase free-project pausing**: confirm the keep-alive ping against `/healthz` actually prevents pausing once traffic is low.
+- **[Watch] Client-side export fidelity**: verify mermaid.js's client-side PNG/SVG export handles large/complex diagrams acceptably across browsers.
+- **[Gotcha] Playground mobile popover positioning — two patterns in use**: Toolbar popovers (theme, direction, layout) are `fixed bottom-16 mb-3` (bottom-anchored above the dock). The Canvas Actions dropdown uses `absolute right-0 mt-3` (anchored below its own trigger icon). Do NOT mix these two patterns — they look the same on desktop but behave very differently on mobile.
+- **[Gotcha] Svelte block closing tag errors from partial replacements**: When replacing a block of template that ends with `{/if}` + `</div>`, leaving behind a duplicate closing chunk produces an `Unexpected block closing tag` Svelte compile error. Always verify the exact lines replaced include all closing tags.
+- **[Gotcha] Mobile zoom on playground canvas**: Do NOT add zoom-in/zoom-out buttons on mobile — pinch-to-zoom is native. Keep fullscreen toggle only. Zoom buttons remain on desktop toolbar.
+- **[Gotcha] Canvas Actions button vs Code Editor button height mismatch**: Actions button used `p-2.5` (square padding) while Code Editor used `px-4 py-2.5` (rectangular). Changed to `px-3.5 py-2.5` to match heights visually.
