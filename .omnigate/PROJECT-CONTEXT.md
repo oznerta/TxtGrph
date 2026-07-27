@@ -51,25 +51,32 @@ Never store secrets here. Use placeholders such as `<HOSTING_RESOURCE>`, `<DATAB
 
 ## 3. Current Sprint Tasks
 
-### Sprint: `Sprint 2 — Workspace & Folders` (dates: `<ASK_DEVELOPER>`)
+### Sprint: `Sprint 4 — Sharing, Trash & Polish` (dates: `<ASK_DEVELOPER>`)
 
-#### Module: `Core Platform`
+#### Module: `Core Platform & Sharing`
 
-##### Feature: `Live Mermaid Editor & Folder Tree Management`
+##### Feature: `Share Links & Soft Delete / Trash`
 
-- [ ] Build CodeMirror 6 source editor + live client-side diagram preview (`mermaid.js` 11.4) in Workspace
-  - Validation commands: `<AUTO_DETECT>`
-  - Success criteria: typing Mermaid syntax in the CodeMirror editor updates the live rendered diagram preview client-side without full page reload or server render round-trips
-- [ ] Create `FOLDERS` and `DIAGRAMS` database schemas & RLS policies in Supabase
-  - Validation commands: `<AUTO_DETECT>`
-  - Success criteria: authenticated users can create, read, update, and soft-delete diagrams and nested folders scoped strictly to their `auth.uid()`
-- [ ] Implement folder tree sidebar navigation & diagram persistence in `apps/web-ui`
-  - Validation commands: `<AUTO_DETECT>`
-  - Success criteria: diagrams and folders persist in Supabase and can be navigated, organized in folders, edited, and previewed in the Workspace
+- [ ] Implement Diagram Share Links (`/share/[id]`) with access control and revocation
+  - Validation commands: Vitest & Playwright
+  - Success criteria: users can generate read-only / interactive share links with token hashes
+- [ ] Implement Trash Bin & Restore for Folders and Diagrams
+  - Validation commands: `pnpm --filter web-ui check`
+  - Success criteria: soft-deleted items move to Trash and can be restored or permanently purged
 
 ---
 
 ### Completed Sprints
+
+#### Sprint: `Sprint 3 — BYOK AI Router & Settings`
+- [x] Build `packages/ai-router` for BYOK LLM provider abstraction (Anthropic, OpenAI, Gemini, Custom OpenAI-compatible) with Vitest unit tests (4/4 passed)
+- [x] Implement Settings page (`/settings`) & BYOK Vault Envelope Key Encryption (AES-256-GCM client-side encryption)
+- [x] Wire BYOK AI Diagram Assistant into Workspace Toolbar with real-time streaming preview and live CodeMirror 6 injection
+
+#### Sprint: `Sprint 2 — Workspace & Folders`
+- [x] Build CodeMirror 6 source editor + live client-side diagram preview (`mermaid.js` 11.4) in Workspace
+- [x] Create `FOLDERS` and `DIAGRAMS` database schemas & RLS policies in Supabase
+- [x] Implement folder tree sidebar navigation & diagram persistence in `apps/web-ui`
 
 #### Sprint: `Sprint 1 — Foundation`
 - [x] Stand up the Vercel project + Supabase project (100% free tier on both), wire env vars for each
@@ -210,9 +217,9 @@ gantt
     MCP Server (stdio first, then remote HTTP) :p5b, after p5a, 10d
 ```
 
-- [ ] **Phase 1: Foundation — Vercel + Supabase scaffold, config, Home + Auth pages**
-- [ ] **Phase 2: Workspace — live client-side editor/preview, Folders**
-- [ ] **Phase 3: BYOK AI Router + Settings**
+- [x] **Phase 1: Foundation — Vercel + Supabase scaffold, config, Home + Auth pages**
+- [x] **Phase 2: Workspace — live client-side editor/preview, Folders**
+- [x] **Phase 3: BYOK AI Router + Settings**
 - [ ] **Phase 4: Share Links, Trash, Theming**
 - [ ] **Phase 5 (deferred): MCP Server + Public API**
 
@@ -438,6 +445,10 @@ gantt
 - **[ADR-009] mermaid.js requires ongoing sanitization discipline**: mermaid.js has a history of CSS-injection/DOM-escape issues via config-driven strings (`themeCSS`, `fontFamily`, `altFontFamily`). Diagram source comes from both users and BYOK AI generation — never pass user/AI-supplied strings into mermaid's config/theming options unsanitized. Keep mermaid patched.
 - **[ADR-010] Open source, non-commercial**: Public repo, no monetization planned. Fits Vercel Hobby's personal/non-commercial ToS as-is. License, `CONTRIBUTING.md`, and issue/PR templates still open (see §20).
 - **[ADR-011] Playground floating panels are mutually exclusive**: Only one floating panel (Code Editor, Canvas Actions menu, or any toolbar popover — theme/direction/layout) can be open at a time. Opening any panel auto-closes all others. Applies on both mobile and desktop. Enforced in `toggleToolbarPopover()`, the actions button click handler, and the Code Editor expand button.
+- **[ADR-012] Workspace 3-pane layout & query-param routing**: Viewport-locked 3-pane studio layout (`h-screen overflow-hidden`) with collapsible left sidebar (`FolderTree`), center editor (`CodeMirrorEditor`), and right live preview. Navigation synced via URL query param `?d=<diagram_id>` to preserve expanded folder tree state.
+- **[ADR-013] Pure CodeMirror 6 with Svelte 5 `$effect` bindings**: Direct instantiation of `@codemirror/view` and `@codemirror/state` inside a Svelte 5 component. Synchronizes external vs internal state changes without resetting text selection or cursor position.
+- **[ADR-014] Client-Side WebCrypto AES-256-GCM BYOK Vault**: Personal API keys are envelope-encrypted client-side using `window.crypto.subtle` AES-256-GCM before storage in Supabase `user_keys`. Supabase Postgres stores only ciphertext + 4-char hints (`sk-ant-...4a9f`).
+- **[ADR-015] Vite Workspace Package Import Aliases**: Web UI (`apps/web-ui/vite.config.ts`) uses `resolve.alias` pointing to `../../packages/*/src/index.ts` alongside package `"development"` and `"types"` exports for hot-reloading workspace TS modules without separate build steps.
 
 ### Gotchas & Lessons Learned
 
@@ -450,3 +461,7 @@ gantt
 - **[Gotcha] Svelte block closing tag errors from partial replacements**: When replacing a block of template that ends with `{/if}` + `</div>`, leaving behind a duplicate closing chunk produces an `Unexpected block closing tag` Svelte compile error. Always verify the exact lines replaced include all closing tags.
 - **[Gotcha] Mobile zoom on playground canvas**: Do NOT add zoom-in/zoom-out buttons on mobile — pinch-to-zoom is native. Keep fullscreen toggle only. Zoom buttons remain on desktop toolbar.
 - **[Gotcha] Canvas Actions button vs Code Editor button height mismatch**: Actions button used `p-2.5` (square padding) while Code Editor used `px-4 py-2.5` (rectangular). Changed to `px-3.5 py-2.5` to match heights visually.
+- **[Gotcha] Svelte 5 `$bindable` vs `$effect` CodeMirror view sync**: Updating CodeMirror state from external prop updates requires checking `view.state.doc.toString() !== value` to prevent infinite update loops and cursor jumps during user typing.
+- **[Gotcha] SvelteKit `tsconfig.json` `moduleResolution` Overrides**: `apps/web-ui/tsconfig.json` extends `./.svelte-kit/tsconfig.json` which specifies `"moduleResolution": "bundler"`. Overriding it with `"moduleResolution": "NodeNext"` breaks `$lib` path mappings and ESM package exports (`lucide-svelte`, workspace packages). Retain default SvelteKit config.
+- **[Gotcha] Lucide `Image` Icon Name Collision with `window.Image`**: Importing `Image` from `lucide-svelte` shadows the native DOM `Image` constructor used in canvas SVG rasterization. Always instantiate native image elements via `new window.Image()` in Svelte components that import `lucide-svelte`.
+- **[Gotcha] Svelte 5 Form Label Association & Accessibility**: Svelte 5 typecheck requires explicit `for="id"` attributes on form `<label>` elements matching input/select `<input id="id">` controls.
