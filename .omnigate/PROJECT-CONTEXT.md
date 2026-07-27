@@ -57,8 +57,8 @@ Never store secrets here. Use placeholders such as `<HOSTING_RESOURCE>`, `<DATAB
 
 ##### Feature: `MCP Server & REST API Endpoints`
 
-- [ ] Build JSON-RPC 2.0 MCP Server (`packages/mcp-server`) for AI agent diagram operations (stdio + remote HTTP)
-- [ ] Implement Public REST API endpoints & `mcp_tokens` authentication table
+- [x] Build JSON-RPC 2.0 MCP Server (`packages/mcp-server`) for AI agent diagram operations (stdio + remote HTTP)
+- [x] Implement Public REST API endpoints & `mcp_tokens` authentication table
 
 ---
 

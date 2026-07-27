@@ -90,3 +90,4 @@ export type TrashItem =
 
 export const CoreVersion = '0.3.0';
 
+export * from './sanitizer.js';

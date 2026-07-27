@@ -5,21 +5,30 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "txtgrph-mcp": "./dist/index.js"
+  },
   "exports": {
     ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "default": "./dist/index.js"
     }
   },
   "scripts": {
     "build": "tsc",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
-    "@txtgrph/config": "workspace:*",
-    "@txtgrph/core": "workspace:*"
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "@supabase/supabase-js": "^2.48.1",
+    "@txtgrph/core": "workspace:*",
+    "zod": "^3.24.2"
   },
   "devDependencies": {
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.5"
   }
 }

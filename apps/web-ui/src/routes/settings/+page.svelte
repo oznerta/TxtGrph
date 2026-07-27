@@ -2,6 +2,7 @@
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { encryptApiKey, generateKeyHint } from '$lib/crypto';
   import { AIRouter, type AIProvider } from '@txtgrph/ai-router';
+  import TokenManager from '$lib/components/settings/TokenManager.svelte';
   import type { UserKeyRecord } from './+page.js';
 
   let { data } = $props();
@@ -277,6 +278,9 @@
           </div>
         {/each}
       </div>
+
+      <!-- MCP & Public REST API Access Tokens Section -->
+      <TokenManager />
     {/if}
   </main>
 </div>
