@@ -1,4 +1,9 @@
 /**
- * BYOK AI Router package shell (Phase 3)
+ * BYOK AI Router Package
  */
-export const AIRouterVersion = '0.1.0';
+export * from './types.js';
+export * from './prompts.js';
+export * from './sanitizer.js';
+export * from './router.js';
+
+export const AIRouterVersion = '0.3.0';
