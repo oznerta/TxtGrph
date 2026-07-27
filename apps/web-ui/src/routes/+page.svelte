@@ -220,7 +220,7 @@
     },
   ];
 
-  let selectedPreset = $state(presets[0]);
+  let selectedPreset = $state<any>(presets[0]);
   let selectedWorkflowStep = $state(workflowSteps[0]);
   let SelectedStepIcon = $derived(selectedWorkflowStep.icon);
   let editorCollapsed = $state(false);
@@ -244,6 +244,7 @@
   let templatesModalOpen = $state(false);
   let modalActiveTab = $state<'templates' | 'types'>('templates');
   let selectedCategoryFilter = $state('All');
+  let selectedLesson = $state<any>(null);
 
   const allDiagramTypes = [
     { name: 'Flowchart', category: 'Flowchart', code: 'graph TD\n  A[Start] --> B(Process)\n  B --> C{Decision}\n  C -- Yes --> D[Result]' },
@@ -290,9 +291,12 @@
   }
 
   // Visual Editing Toolbar State
-  let selectedMermaidTheme = $state<'dark' | 'forest' | 'neutral' | 'base' | 'default'>('dark');
+  let selectedMermaidTheme = $state<'dark' | 'forest' | 'neutral' | 'base' | 'default' | 'ocean' | 'rose' | 'monochrome'>('dark');
   let canvasMode = $state<'dark' | 'light'>('dark');
   let canvasPattern = $state<'dots' | 'grid' | 'crosses' | 'solid'>('dots');
+
+  let customImageUrl = $state('');
+  let customImageLabel = $state('');
 
   let isAutoLayoutEnabled = $state(true);
   let activeToolbarPopover = $state<'none' | 'theme' | 'direction' | 'layout'>('none');
@@ -306,7 +310,7 @@
     changeMermaidTheme(selectedMermaidTheme);
   }
 
-  function changeMermaidTheme(newTheme: string) {
+  function changeMermaidTheme(newTheme: typeof selectedMermaidTheme) {
     selectedMermaidTheme = newTheme;
     const isLight = canvasMode === 'light';
 
@@ -472,7 +476,7 @@
 
   function setLayoutAlgorithm(algo: 'hierarchical' | 'adaptive') {
     currentLayoutAlgorithm = algo;
-    const renderer = algo === 'adaptive' ? 'elk' : 'dagre';
+    const renderer = algo === 'adaptive' ? 'elk' : 'dagre-wrapper';
     try {
       mermaid.initialize({
         startOnLoad: false,
@@ -851,14 +855,14 @@
     }
   }
 
-  function handlePresetSelect(preset: typeof presets[0]) {
+  function handlePresetSelect(preset: any) {
     selectedPreset = preset;
     code = preset.code;
     compileDiagram(preset.code);
     commandPaletteOpen = false;
   }
 
-  function handleLessonSelect(lesson: typeof syntaxLessons[0]) {
+  function handleLessonSelect(lesson: any) {
     selectedLesson = lesson;
     code = lesson.code;
     compileDiagram(lesson.code);
@@ -936,7 +940,7 @@
   }
 
   function rasterizeSvgToImage(svgString: string, format: 'png' | 'jpeg', filename: string) {
-    const img = new Image();
+    const img = new window.Image();
     const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(svgBlob);
 
@@ -1214,6 +1218,8 @@
       </div>
       
       <!-- SVG Canvas Render Container with Interactive Pan & Zoom -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
       <div
         onmousedown={startPan}
         onmousemove={onPanMove}

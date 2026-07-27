@@ -303,9 +303,12 @@
   ];
 
   // Visual Editing Toolbar State
-  let selectedMermaidTheme = $state<'dark' | 'forest' | 'neutral' | 'base' | 'default'>('dark');
+  let selectedMermaidTheme = $state<'dark' | 'forest' | 'neutral' | 'base' | 'default' | 'ocean' | 'rose' | 'monochrome'>('dark');
   let canvasMode = $state<'dark' | 'light'>('dark');
   let canvasPattern = $state<'dots' | 'grid' | 'crosses' | 'solid'>('dots');
+
+  let customImageUrl = $state('');
+  let customImageLabel = $state('');
 
   let isAutoLayoutEnabled = $state(true);
   let activeToolbarPopover = $state<'none' | 'theme' | 'direction' | 'layout'>('none');
@@ -319,7 +322,7 @@
     changeMermaidTheme(selectedMermaidTheme);
   }
 
-  function changeMermaidTheme(newTheme: string) {
+  function changeMermaidTheme(newTheme: typeof selectedMermaidTheme) {
     selectedMermaidTheme = newTheme;
     const isLight = canvasMode === 'light';
 
@@ -487,7 +490,7 @@
 
   function setLayoutAlgorithm(algo: 'hierarchical' | 'adaptive') {
     currentLayoutAlgorithm = algo;
-    const renderer = algo === 'adaptive' ? 'elk' : 'dagre';
+    const renderer = algo === 'adaptive' ? 'elk' : 'dagre-wrapper';
     try {
       mermaid.initialize({
         startOnLoad: false,
@@ -935,7 +938,7 @@
   }
 
   function rasterizeSvgToImage(svgString: string, format: 'png' | 'jpeg', filename: string) {
-    const img = new Image();
+    const img = new window.Image();
     const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(svgBlob);
 
@@ -1037,6 +1040,8 @@
   {/if}
 
   <!-- 100% Full-Bleed Interactive Canvas Workspace -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     onmousedown={startPan}
     onmousemove={onPanMove}

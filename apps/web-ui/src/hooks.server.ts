@@ -4,6 +4,8 @@ import { loadAppConfig } from '@txtgrph/config';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { SUPABASE_SERVICE_ROLE_KEY, VAULT_ROOT_KEY } from '$env/static/private';
 
+const nodeEnv = (globalThis as any).process?.env?.NODE_ENV || 'development';
+
 // Boot validation check
 try {
   loadAppConfig({
@@ -11,11 +13,11 @@ try {
     PUBLIC_SUPABASE_ANON_KEY,
     SUPABASE_SERVICE_ROLE_KEY,
     VAULT_ROOT_KEY,
-    NODE_ENV: process.env.NODE_ENV || 'development',
+    NODE_ENV: nodeEnv,
   });
 } catch (err) {
   // Fail fast in production or log warning in dev when placeholders are present
-  if (process.env.NODE_ENV === 'production') {
+  if (nodeEnv === 'production') {
     throw err;
   }
 }
