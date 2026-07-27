@@ -17,9 +17,13 @@
     ZoomOut,
     Maximize2,
     Sparkles,
-    Settings
+    Settings,
+    Share2,
+    Trash2
   } from 'lucide-svelte';
   import AIAssistantModal from '$lib/components/workspace/AIAssistantModal.svelte';
+  import ShareModal from '$lib/components/workspace/ShareModal.svelte';
+  import TrashBinModal from '$lib/components/workspace/TrashBinModal.svelte';
   import { goto } from '$app/navigation';
   import mermaid from 'mermaid';
 
@@ -29,6 +33,9 @@
   let sidebarOpen = $state(true);
   let isEditingTitle = $state(false);
   let activeTitleInput = $state('');
+
+  let shareModalOpen = $state(false);
+  let trashModalOpen = $state(false);
 
   // Live Mermaid Render State
   let mermaidContainer: HTMLDivElement;
@@ -148,7 +155,11 @@
         title: created.title,
         code: created.code,
         config: created.config || {},
-        isDeleted: created.is_deleted,
+        isShared: created.is_shared || false,
+        shareToken: created.share_token || null,
+        shareUpdatedAt: created.share_updated_at || null,
+        isDeleted: created.is_deleted || false,
+        deletedAt: created.deleted_at || null,
         createdAt: created.created_at,
         updatedAt: created.updated_at
       };
@@ -177,6 +188,8 @@
         userId: created.user_id,
         parentId: created.parent_id,
         name: created.name,
+        isDeleted: created.is_deleted || false,
+        deletedAt: created.deleted_at || null,
         createdAt: created.created_at,
         updatedAt: created.updated_at
       };
@@ -186,27 +199,26 @@
   }
 
   async function handleDeleteDiagram(id: string) {
-    workspaceStore.diagrams = workspaceStore.diagrams.filter((d) => d.id !== id);
-    if (workspaceStore.activeDiagramId === id) {
-      const remaining = workspaceStore.diagrams;
-      workspaceStore.activeDiagramId = remaining.length > 0 ? remaining[0].id : null;
-    }
-
+    workspaceStore.softDeleteDiagram(id);
     await supabase
       .from('diagrams')
-      .update({ is_deleted: true })
+      .update({ is_deleted: true, deleted_at: new Date().toISOString() })
       .eq('id', id);
   }
 
   async function handleDeleteFolder(id: string) {
-    workspaceStore.folders = workspaceStore.folders.filter((f) => f.id !== id);
-    await supabase.from('folders').delete().eq('id', id);
+    workspaceStore.softDeleteFolder(id);
+    await supabase
+      .from('folders')
+      .update({ is_deleted: true, deleted_at: new Date().toISOString() })
+      .eq('id', id);
   }
 
   async function handleSignOut() {
     await supabase.auth.signOut();
     await goto('/auth');
   }
+
 </script>
 
 <div class="h-screen w-screen flex flex-col bg-[var(--color-surface-app)] overflow-hidden">
@@ -273,6 +285,30 @@
     </div>
 
     <div class="flex items-center gap-2 text-[13px]">
+      {#if workspaceStore.activeDiagram}
+        <button
+          onclick={() => (shareModalOpen = true)}
+          title="Share Diagram Link"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[5px] border border-slate-700 bg-slate-800 text-slate-200 font-medium hover:bg-slate-700 transition-colors"
+        >
+          <Share2 size={15} class="text-indigo-400" />
+          <span class="hidden sm:inline">Share</span>
+        </button>
+      {/if}
+
+      <button
+        onclick={() => (trashModalOpen = true)}
+        title="Trash Bin"
+        class="relative inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[5px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-subtle)] transition-colors"
+      >
+        <Trash2 size={16} />
+        {#if workspaceStore.trashedCount > 0}
+          <span class="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500/20 text-[10px] font-bold text-red-400 border border-red-500/30 px-1">
+            {workspaceStore.trashedCount}
+          </span>
+        {/if}
+      </button>
+
       <button
         onclick={() => (aiModalOpen = true)}
         title="BYOK AI Assistant"
@@ -304,6 +340,7 @@
       </button>
     </div>
   </header>
+
 
   <!-- Main Viewport-Locked Studio Body -->
   <main class="flex-1 flex min-h-0 overflow-hidden">
@@ -438,3 +475,15 @@
   currentCode={workspaceStore.activeCode}
   onApply={(newCode: string) => handleCodeChange(newCode)}
 />
+
+<ShareModal
+  open={shareModalOpen}
+  diagram={workspaceStore.activeDiagram}
+  onclose={() => (shareModalOpen = false)}
+/>
+
+<TrashBinModal
+  open={trashModalOpen}
+  onclose={() => (trashModalOpen = false)}
+/>
+

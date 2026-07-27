@@ -8,6 +8,8 @@ export const FolderSchema = z.object({
   userId: z.string().uuid(),
   parentId: z.string().uuid().nullable(),
   name: z.string().min(1, 'Folder name cannot be empty').max(255),
+  isDeleted: z.boolean().default(false),
+  deletedAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -31,7 +33,11 @@ export const DiagramSchema = z.object({
   title: z.string().min(1, 'Title cannot be empty').max(255),
   code: z.string(),
   config: z.record(z.unknown()).default({}),
+  isShared: z.boolean().default(false),
+  shareToken: z.string().uuid().nullable().optional(),
+  shareUpdatedAt: z.string().datetime().nullable().optional(),
   isDeleted: z.boolean().default(false),
+  deletedAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -52,9 +58,35 @@ export const UpdateDiagramInputSchema = z.object({
   folderId: z.string().uuid().nullable().optional(),
   code: z.string().optional(),
   config: z.record(z.unknown()).optional(),
+  isShared: z.boolean().optional(),
+  shareToken: z.string().uuid().nullable().optional(),
+  shareUpdatedAt: z.string().datetime().nullable().optional(),
   isDeleted: z.boolean().optional(),
+  deletedAt: z.string().datetime().nullable().optional(),
 });
 
 export type UpdateDiagramInput = z.infer<typeof UpdateDiagramInputSchema>;
 
-export const CoreVersion = '0.2.0';
+/**
+ * Shared Diagram Payload Schema & Types
+ */
+export const SharedDiagramPayloadSchema = z.object({
+  id: z.string().uuid(),
+  shareToken: z.string().uuid(),
+  title: z.string(),
+  code: z.string(),
+  config: z.record(z.unknown()).default({}),
+  updatedAt: z.string().datetime(),
+});
+
+export type SharedDiagramPayload = z.infer<typeof SharedDiagramPayloadSchema>;
+
+/**
+ * Trash Item Type
+ */
+export type TrashItem =
+  | { type: 'diagram'; data: Diagram }
+  | { type: 'folder'; data: Folder; childCount: number };
+
+export const CoreVersion = '0.3.0';
+
