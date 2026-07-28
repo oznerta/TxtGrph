@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Diagram, Folder } from '@txtgrph/core';
+  import type { Diagram, Folder } from '$lib/stores/workspaceStore.svelte';
   import DiagramCard from './DiagramCard.svelte';
   import MultiExportModal from './MultiExportModal.svelte';
   import MultiMoveModal from './MultiMoveModal.svelte';
@@ -28,8 +28,12 @@
     Edit3,
     FolderInput,
     X,
-    Clock
+    Clock,
+    Sparkles,
+    Building2,
+    User
   } from 'lucide-svelte';
+  import { workspaceStore } from '$lib/stores/workspaceStore.svelte';
 
   const scopeOptions: SelectOption[] = [
     { value: 'all', label: 'All files' },
@@ -57,10 +61,13 @@
     onOpenAiModal?: () => void;
     onToggleFavorite?: (id: string) => void;
     onShareDiagram?: (diagram: Diagram) => void;
+    onRenameFolder?: (id: string, currentName: string) => void;
+    onRenameDiagram?: (id: string, currentTitle: string) => void;
     onDeleteDiagram?: (id: string) => void;
     onDeleteFolder?: (id: string) => void;
     onDuplicateDiagrams?: (ids: string[]) => void;
     onMoveDiagrams?: (ids: string[], targetFolderId: string | null) => void;
+    onMoveFolders?: (ids: string[], targetFolderId: string | null) => void;
   }
 
   let {
@@ -77,13 +84,19 @@
     onOpenAiModal = () => {},
     onToggleFavorite = () => {},
     onShareDiagram = () => {},
+    onRenameFolder = () => {},
+    onRenameDiagram = () => {},
     onDeleteDiagram = () => {},
     onDeleteFolder = () => {},
     onDuplicateDiagrams = () => {},
     onMoveDiagrams = () => {},
+    onMoveFolders = () => {},
   }: Props = $props();
 
   let searchQuery = $state('');
+  let activeOrg = $derived.by(() => {
+    return workspaceStore.organizations.find((o) => o.id === workspaceStore.activeOrgId) || null;
+  });
   let viewMode = $state<'grid' | 'list'>('grid');
   let filterScope = $state<'all' | 'recents' | 'favorites' | 'shared'>('all');
   let sortOption = $state<'modified' | 'name'>('modified');
@@ -122,22 +135,25 @@
     return crumbs;
   });
 
-  // Derived Subfolders inside current active folder
+  // Derived Subfolders inside current active folder and active space
   let subFolders = $derived.by(() => {
-    return folders.filter((f) => f.parentId === activeFolderId && !f.isDeleted);
+    const orgId = workspaceStore.activeOrgId;
+    return folders.filter(
+      (f) =>
+        f.parentId === activeFolderId &&
+        !f.isDeleted &&
+        (orgId ? f.organizationId === orgId : !f.organizationId)
+    );
   });
 
-  // Derived Top 4 Recently Opened Diagrams for Dashboard Landing
-  let recentDiagrams = $derived.by(() => {
-    return [...diagrams]
-      .filter((d) => !d.isDeleted)
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .slice(0, 4);
-  });
-
-  // Derived Diagrams inside current active folder
+  // Derived Diagrams inside current active folder and active space
   let filteredDiagrams = $derived.by(() => {
-    let result = diagrams.filter((d) => !d.isDeleted);
+    const orgId = workspaceStore.activeOrgId;
+    let result = diagrams.filter(
+      (d) =>
+        !d.isDeleted &&
+        (orgId ? d.organizationId === orgId : !d.organizationId)
+    );
 
     if (filterScope === 'recents') {
       result = [...result].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -150,33 +166,22 @@
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      result = result.filter(
-        (d) => d.title.toLowerCase().includes(q) || d.code.toLowerCase().includes(q)
-      );
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter((d) => d.title.toLowerCase().includes(q) || d.code.toLowerCase().includes(q));
+    }
+
+    if (sortOption === 'name') {
+      result.sort((a, b) => a.title.localeCompare(b.title));
+    } else {
+      result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     }
 
     return result;
   });
 
-  // Context Menu State for Folder Cards
-  let activeMenuFolderId = $state<string | null>(null);
-
-  function formatTimeAgo(isoDateStr: string) {
-    if (!isoDateStr) return '';
-    const date = new Date(isoDateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffDays > 0) return `${diffDays}d ago`;
-    if (diffHours > 0) return `${diffHours}h ago`;
-    return 'recently';
-  }
-
-  function toggleSelectDiagram(id: string, e?: Event) {
-    if (e) e.stopPropagation();
+  // Multi-Selection Helper Functions
+  function toggleSelectDiagram(id: string, e: MouseEvent) {
+    e.stopPropagation();
     const next = new Set(selectedDiagramIds);
     if (next.has(id)) {
       next.delete(id);
@@ -186,8 +191,8 @@
     selectedDiagramIds = next;
   }
 
-  function toggleSelectFolder(id: string, e?: Event) {
-    if (e) e.stopPropagation();
+  function toggleSelectFolder(id: string, e: MouseEvent) {
+    e.stopPropagation();
     const next = new Set(selectedFolderIds);
     if (next.has(id)) {
       next.delete(id);
@@ -197,30 +202,52 @@
     selectedFolderIds = next;
   }
 
-  function selectAllItems() {
-    const totalAvailable = subFolders.length + filteredDiagrams.length;
-    if (totalSelectedCount === totalAvailable && totalAvailable > 0) {
+  function selectAllDiagrams() {
+    if (selectedDiagramIds.size === filteredDiagrams.length) {
       selectedDiagramIds = new Set();
-      selectedFolderIds = new Set();
     } else {
       selectedDiagramIds = new Set(filteredDiagrams.map((d) => d.id));
-      selectedFolderIds = new Set(subFolders.map((f) => f.id));
     }
   }
 
-  function deleteSelectedItems() {
-    selectedDiagramIds.forEach((id) => onDeleteDiagram(id));
-    selectedFolderIds.forEach((id) => onDeleteFolder(id));
+  function formatTimeAgo(isoString: string): string {
+    if (!isoString) return 'Just now';
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffInSeconds < 60) return 'Just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+    return `${Math.floor(diffInSeconds / 86400)}d ago`;
+  }
+
+  // Active Context Menu for Folder Cards
+  let activeMenuFolderId = $state<string | null>(null);
+
+  // Multi-Action Handlers
+  function handleMultiDelete() {
+    for (const id of selectedDiagramIds) {
+      onDeleteDiagram(id);
+    }
+    for (const id of selectedFolderIds) {
+      onDeleteFolder(id);
+    }
     clearSelection();
   }
 
-  function duplicateSelectedDiagrams() {
+  function handleMultiDuplicate() {
     onDuplicateDiagrams(Array.from(selectedDiagramIds));
     clearSelection();
   }
 
   function handleConfirmMove(targetFolderId: string | null) {
-    onMoveDiagrams(Array.from(selectedDiagramIds), targetFolderId);
+    if (selectedDiagramIds.size > 0) {
+      onMoveDiagrams(Array.from(selectedDiagramIds), targetFolderId);
+    }
+    if (selectedFolderIds.size > 0) {
+      onMoveFolders(Array.from(selectedFolderIds), targetFolderId);
+    }
     clearSelection();
   }
 
@@ -232,15 +259,16 @@
 
 <svelte:window onclick={() => (activeMenuFolderId = null)} />
 
-<div class="flex-1 min-h-0 flex flex-col overflow-y-auto bg-[var(--color-surface-app)] p-6 space-y-6 select-none relative">
-  <!-- Top Navigation Breadcrumb Bar when inside a folder -->
-  <div class="flex items-center justify-between">
+<div class="flex-1 min-h-0 flex flex-col overflow-y-auto bg-[#090A0F] p-6 sm:p-8 space-y-6 select-none relative font-['Instrument_Sans',sans-serif]">
+  <!-- Top Hero Header Bar: Breadcrumb + Stats + Action Buttons -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
+    <!-- Left: Navigation Breadcrumb & Stats -->
     <div class="flex items-center gap-3">
       {#if !sidebarOpen}
         <button
           onclick={onToggleSidebar}
           title="Open Sidebar"
-          class="p-2 rounded-lg bg-[var(--color-surface-card)] text-[var(--color-text-primary)] border border-[var(--color-border-default)] hover:bg-[var(--color-surface-subtle)] transition-colors shrink-0 shadow-sm"
+          class="p-2 rounded-xl bg-white/5 text-white/80 border border-white/15 hover:bg-white/10 transition-colors shrink-0 shadow-sm cursor-pointer"
         >
           <Menu size={18} />
         </button>
@@ -249,122 +277,62 @@
       {#if activeFolderId && currentFolder}
         <button
           onclick={() => onSelectFolder(currentFolder.parentId)}
-          class="p-1.5 rounded-lg bg-[var(--color-surface-card)] border border-[var(--color-border-default)] hover:bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+          class="p-2 rounded-xl bg-white/5 border border-white/15 hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer"
           title="Back to parent folder"
         >
           <ArrowLeft size={16} />
         </button>
       {/if}
 
-      <div class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2 flex-wrap">
-        <button
-          onclick={() => onSelectFolder(null)}
-          class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-        >
-          Personal files
-        </button>
-        {#each folderBreadcrumbs as crumb, i (crumb.id)}
-          <span class="text-[var(--color-text-tertiary)]">/</span>
-          {#if i === folderBreadcrumbs.length - 1}
-            <span class="text-[var(--color-text-primary)] font-bold">{crumb.name}</span>
-          {:else}
-            <button
-              onclick={() => onSelectFolder(crumb.id)}
-              class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-            >
-              {crumb.name}
-            </button>
-          {/if}
-        {/each}
-      </div>
-    </div>
-  </div>
-
-  <!-- Full-Width Top Search Bar (Matching Reference Layout) -->
-  <div class="relative w-full">
-    <Search class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-    <input
-      type="text"
-      bind:value={searchQuery}
-      placeholder="Search"
-      class="w-full pl-10 pr-4 py-2.5 text-xs rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-card)] text-[var(--color-text-primary)] placeholder-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brass)] shadow-sm"
-    />
-  </div>
-
-  <!-- Dashboard Hero Section: Recently Opened Diagrams (Compact List Layout) -->
-  {#if !activeFolderId && !searchQuery.trim() && recentDiagrams.length > 0 && filterScope === 'all'}
-    <div class="space-y-2.5 pb-3 border-b border-white/10 font-['Instrument_Sans',sans-serif]">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <Clock size={15} class="text-amber-400" />
-          <h2 class="text-xs font-bold text-white uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
-            Recently Opened
-          </h2>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-        {#each recentDiagrams as diagram (diagram.id)}
-          <div
-            role="button"
-            tabindex="0"
-            onclick={() => onSelectDiagram(diagram.id)}
-            onkeydown={(e) => e.key === 'Enter' && onSelectDiagram(diagram.id)}
-            class="group flex items-center justify-between p-2.5 rounded-xl border border-white/10 bg-[#0F1117] hover:border-white/20 hover:bg-white/[0.03] transition-all cursor-pointer select-none"
+      <div>
+        <div class="text-base sm:text-lg font-bold text-white flex items-center gap-2 flex-wrap tracking-tight">
+          <button
+            onclick={() => onSelectFolder(null)}
+            class="text-white/60 hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
           >
-            <div class="flex items-center gap-2.5 min-w-0 flex-1">
-              <div class="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
-                <FileText size={14} />
-              </div>
-              <div class="min-w-0 flex-1">
-                <div class="text-xs font-semibold text-white truncate group-hover:text-amber-400 transition-colors">
-                  {diagram.title || 'Untitled diagram'}
-                </div>
-                <div class="text-[10.5px] text-white/40 font-['IBM_Plex_Mono',monospace]">
-                  Opened {formatTimeAgo(diagram.updatedAt)}
-                </div>
-              </div>
-            </div>
-
-            <div class="flex items-center gap-1 shrink-0">
+            {#if activeOrg}
+              <Building2 size={16} class="text-amber-400" />
+              <span>{activeOrg.name}</span>
+            {:else}
+              <User size={16} class="text-white/40" />
+              <span>Personal space</span>
+            {/if}
+          </button>
+          {#each folderBreadcrumbs as crumb, i (crumb.id)}
+            <span class="text-white/30">/</span>
+            {#if i === folderBreadcrumbs.length - 1}
+              <span class="text-white font-bold inline-flex items-center gap-1.5">
+                <span>{crumb.name}</span>
+                <button
+                  onclick={() => onRenameFolder(crumb.id, crumb.name)}
+                  title="Rename folder"
+                  class="p-1 rounded-lg text-white/40 hover:text-amber-400 hover:bg-white/10 transition-colors"
+                >
+                  <Edit3 size={14} />
+                </button>
+              </span>
+            {:else}
               <button
-                type="button"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  onToggleFavorite(diagram.id);
-                }}
-                title={favoriteIds.has(diagram.id) ? 'Remove from Favorites' : 'Add to Favorites'}
-                class="p-1.5 rounded-lg text-white/40 hover:text-amber-400 hover:bg-white/10 transition-colors cursor-pointer"
+                onclick={() => onSelectFolder(crumb.id)}
+                class="text-white/60 hover:text-white transition-colors cursor-pointer"
               >
-                <FavoriteIcon active={favoriteIds.has(diagram.id)} size={13} />
+                {crumb.name}
               </button>
-
-              <button
-                type="button"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  onShareDiagram(diagram);
-                }}
-                title="Share diagram"
-                class="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                <Share2 size={13} />
-              </button>
-            </div>
-          </div>
-        {/each}
+            {/if}
+          {/each}
+        </div>
+        <p class="text-xs text-white/40 mt-0.5 font-medium font-['IBM_Plex_Mono',monospace]">
+          {filteredDiagrams.length} {filteredDiagrams.length === 1 ? 'diagram' : 'diagrams'} · {subFolders.length} {subFolders.length === 1 ? 'folder' : 'folders'}
+        </p>
       </div>
     </div>
-  {/if}
 
-  <!-- Action Bar (New diagram, New folder, Filters, Grid/List Toggles) -->
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
-    <!-- Left: New Diagram & New Folder Buttons -->
-    <div class="flex items-center gap-3">
-      <div class="inline-flex rounded-xl shadow-md border border-white/20 overflow-hidden bg-white text-black">
+    <!-- Right: Primary Action Buttons -->
+    <div class="flex items-center gap-2.5 shrink-0">
+      <div class="inline-flex rounded-xl shadow-lg border border-white/20 overflow-hidden bg-white text-black">
         <button
           onclick={() => onCreateDiagram(activeFolderId)}
-          class="px-4 py-2 text-xs font-bold hover:bg-slate-200 transition-colors flex items-center gap-2 border-r border-slate-300 cursor-pointer"
+          class="px-4 py-2 text-xs font-bold hover:bg-slate-200 transition-colors flex items-center gap-2 border-r border-slate-300 cursor-pointer btn-premium"
         >
           <Plus class="w-4 h-4 text-black stroke-[3]" />
           <span>New diagram</span>
@@ -372,13 +340,13 @@
         <button
           onclick={onOpenAiModal}
           title="Create with AI Assistant"
-          class="px-2.5 py-2 hover:bg-slate-200 text-black transition-colors cursor-pointer"
+          class="px-3 py-2 hover:bg-slate-200 text-black transition-colors cursor-pointer flex items-center gap-1.5"
         >
-          <ChevronDown class="w-3.5 h-3.5" />
+          <Sparkles class="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
+          <ChevronDown class="w-3.5 h-3.5 text-black/60" />
         </button>
       </div>
 
-      <!-- New Folder Button (Matching Homepage Styling) -->
       <button
         onclick={() => onCreateFolder(activeFolderId)}
         class="px-4 py-2 text-xs font-semibold rounded-xl bg-white/10 border border-white/15 text-white hover:bg-white/20 shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
@@ -387,10 +355,32 @@
         <span>New folder</span>
       </button>
     </div>
+  </div>
 
-    <!-- Right Controls: Scope, Sort, View Toggles -->
-    <div class="flex items-center gap-3">
-      <!-- Scope Filter Select -->
+  <!-- Unified Search & Controls Toolbar -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+    <!-- Search Bar with Shortcut Badge -->
+    <div class="relative flex-1 max-w-md">
+      <Search class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40" />
+      <input
+        type="text"
+        bind:value={searchQuery}
+        placeholder="Search diagrams or code content..."
+        class="w-full pl-10 pr-9 py-2 text-xs rounded-xl border border-white/15 bg-[#0F1117] text-white placeholder-white/40 focus:outline-none focus:border-white/30 shadow-sm transition-all"
+      />
+      {#if searchQuery}
+        <button
+          onclick={() => (searchQuery = '')}
+          class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white p-0.5 rounded-md transition-colors"
+        >
+          <X size={13} />
+        </button>
+      {/if}
+    </div>
+
+    <!-- Filter Scope Pills & View Toggles -->
+    <div class="flex items-center gap-3 shrink-0">
+      <!-- Scope Filter Dropdown -->
       <div class="w-36">
         <CustomSelect
           options={scopeOptions}
@@ -398,7 +388,7 @@
         />
       </div>
 
-      <!-- Sort Select -->
+      <!-- Sort Options Dropdown -->
       <div class="w-36">
         <CustomSelect
           options={sortOptions}
@@ -406,30 +396,86 @@
         />
       </div>
 
-      <!-- View Toggle -->
-      <div class="flex items-center bg-[var(--color-surface-subtle)] p-0.5 rounded-lg border border-[var(--color-border-default)]">
+      <!-- Grid vs List View Toggle -->
+      <div class="flex items-center bg-white/5 p-1 rounded-xl border border-white/10">
         <button
           onclick={() => (viewMode = 'grid')}
           title="Grid View"
-          class="p-1.5 rounded-md transition-colors {viewMode === 'grid' ? 'bg-[var(--color-surface-card)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
+          class="p-1.5 rounded-lg transition-colors cursor-pointer {viewMode === 'grid' ? 'bg-white text-black shadow-sm font-bold' : 'text-white/50 hover:text-white'}"
         >
-          <LayoutGrid class="w-4 h-4" />
+          <LayoutGrid class="w-3.5 h-3.5" />
         </button>
         <button
           onclick={() => (viewMode = 'list')}
           title="List View"
-          class="p-1.5 rounded-md transition-colors {viewMode === 'list' ? 'bg-[var(--color-surface-card)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
+          class="p-1.5 rounded-lg transition-colors cursor-pointer {viewMode === 'list' ? 'bg-white text-black shadow-sm font-bold' : 'text-white/50 hover:text-white'}"
         >
-          <List class="w-4 h-4" />
+          <List class="w-3.5 h-3.5" />
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Folders Section (Matching Screenshot Reference) -->
+  <!-- Multi-Selection Action Banner (when items selected) -->
+  {#if totalSelectedCount > 0}
+    <div class="flex items-center justify-between p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-white animate-in fade-in duration-150 shadow-xl">
+      <div class="flex items-center gap-3">
+        <div class="w-7 h-7 rounded-xl bg-amber-500/20 text-amber-400 font-bold text-xs flex items-center justify-center">
+          {totalSelectedCount}
+        </div>
+        <span class="text-xs font-semibold text-white">
+          {totalSelectedCount} {totalSelectedCount === 1 ? 'item' : 'items'} selected
+        </span>
+      </div>
+
+      <div class="flex items-center gap-2 text-xs">
+        {#if selectedDiagramIds.size > 0}
+          <button
+            onclick={() => (exportModalOpen = true)}
+            class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white transition-colors flex items-center gap-1.5 font-semibold cursor-pointer"
+          >
+            <Upload size={13} /> Export Batch
+          </button>
+          <button
+            onclick={handleMultiDuplicate}
+            class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white transition-colors flex items-center gap-1.5 font-semibold cursor-pointer"
+          >
+            <Copy size={13} /> Duplicate
+          </button>
+          <button
+            onclick={() => (moveModalOpen = true)}
+            class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white transition-colors flex items-center gap-1.5 font-semibold cursor-pointer"
+          >
+            <FolderInput size={13} /> Move
+          </button>
+        {/if}
+
+        <button
+          onclick={handleMultiDelete}
+          class="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 transition-colors flex items-center gap-1.5 font-semibold cursor-pointer"
+        >
+          <Trash2 size={13} /> Delete
+        </button>
+
+        <button
+          onclick={clearSelection}
+          class="p-1.5 rounded-xl hover:bg-white/10 text-white/50 hover:text-white transition-colors cursor-pointer"
+          title="Clear selection"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Folders Section -->
   {#if subFolders.length > 0}
     <div class="space-y-3">
-      <h3 class="text-xs font-semibold text-[var(--color-text-secondary)]">Folders</h3>
+      <div class="flex items-center justify-between">
+        <h3 class="text-xs font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
+          Folders ({subFolders.length})
+        </h3>
+      </div>
 
       {#if viewMode === 'grid'}
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -441,30 +487,30 @@
               tabindex="0"
               onclick={() => onSelectFolder(folder.id)}
               onkeydown={(e) => e.key === 'Enter' && onSelectFolder(folder.id)}
-              class="group cursor-pointer rounded-xl border border-[var(--color-border-default)] bg-[var(--color-surface-card)] p-4 hover:border-[var(--color-brass)] hover:shadow-md transition-all duration-200 flex items-center justify-between relative {isFolderSelected ? 'border-indigo-500 bg-indigo-500/10' : ''}"
+              class="group cursor-pointer rounded-2xl border border-white/15 bg-[#0F1117] p-4 hover:border-amber-500/50 hover:shadow-xl transition-all duration-200 flex items-center justify-between hover:-translate-y-0.5 {isFolderSelected ? 'border-amber-500 bg-amber-500/10' : ''} {activeMenuFolderId === folder.id ? 'z-[50] relative' : 'relative z-10'}"
             >
               <!-- Checkbox Overlay for Folder Multi-Select -->
               <button
                 onclick={(e) => toggleSelectFolder(folder.id, e)}
-                class="absolute top-2 left-2 z-20 p-1.5 rounded-lg bg-black/60 backdrop-blur-sm text-white opacity-0 group-hover:opacity-100 transition-opacity {isFolderSelected ? 'opacity-100 text-indigo-400' : ''}"
+                class="absolute top-3 left-3 z-20 p-1.5 rounded-lg bg-black/80 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 transition-opacity {isFolderSelected ? 'opacity-100 text-amber-400' : ''}"
                 title="Select folder"
               >
                 {#if isFolderSelected}
-                  <CheckSquare size={16} class="text-indigo-400 fill-indigo-400/20" />
+                  <CheckSquare size={15} class="text-amber-400 fill-amber-400/20" />
                 {:else}
-                  <Square size={16} />
+                  <Square size={15} />
                 {/if}
               </button>
 
-              <div class="flex items-center gap-3 min-w-0 pl-5">
-                <div class="p-2.5 rounded-lg bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] group-hover:text-[var(--color-brass-text)] transition-colors">
-                  <FolderIcon size={20} />
+              <div class="flex items-center gap-3.5 min-w-0 pl-6">
+                <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <FolderIcon size={18} />
                 </div>
                 <div class="min-w-0 truncate">
-                  <h4 class="font-semibold text-xs text-[var(--color-text-primary)] truncate group-hover:text-[var(--color-brass-text)] transition-colors">
+                  <h4 class="font-semibold text-xs text-white truncate group-hover:text-amber-400 transition-colors">
                     {folder.name}
                   </h4>
-                  <p class="text-[10px] text-[var(--color-text-muted)] mt-0.5 font-mono">
+                  <p class="text-[11px] text-white/40 mt-0.5 font-['IBM_Plex_Mono',monospace]">
                     {folderDiagramCount} {folderDiagramCount === 1 ? 'diagram' : 'diagrams'}
                   </p>
                 </div>
@@ -477,7 +523,7 @@
                     e.stopPropagation();
                     activeMenuFolderId = activeMenuFolderId === folder.id ? null : folder.id;
                   }}
-                  class="p-1 rounded-md hover:bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors opacity-0 group-hover:opacity-100"
+                  class="p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
                 >
                   <MoreVertical size={14} />
                 </button>
@@ -486,15 +532,24 @@
                   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
                   <div
                     role="presentation"
-                    class="absolute right-0 top-full mt-1 w-36 rounded-lg bg-[var(--color-surface-card)] border border-[var(--color-border-default)] shadow-xl py-1 z-30 text-[11px]"
+                    class="absolute right-0 top-full mt-1 w-36 rounded-xl bg-[#141620] border border-white/20 shadow-2xl py-1 z-30 text-[11px] font-['Instrument_Sans',sans-serif]"
                     onclick={(e) => e.stopPropagation()}
                   >
                     <button
                       onclick={() => {
                         activeMenuFolderId = null;
+                        onRenameFolder(folder.id, folder.name);
+                      }}
+                      class="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-white/10 text-white"
+                    >
+                      <Edit3 size={12} class="text-amber-400" /> Rename folder
+                    </button>
+                    <button
+                      onclick={() => {
+                        activeMenuFolderId = null;
                         onSelectFolder(folder.id);
                       }}
-                      class="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-[var(--color-surface-subtle)] text-[var(--color-text-primary)]"
+                      class="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-white/10 text-white"
                     >
                       <FolderOpen size={12} /> Open
                     </button>
@@ -515,11 +570,11 @@
         </div>
       {:else}
         <!-- List View for Folders -->
-        <div class="border border-[var(--color-border-default)] rounded-xl overflow-hidden bg-[var(--color-surface-card)] text-xs">
+        <div class="border border-white/15 rounded-2xl overflow-hidden bg-[#0F1117] text-xs">
           <table class="w-full text-left">
-            <thead class="bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] font-medium border-b border-[var(--color-border-default)]">
+            <thead class="bg-white/5 text-white/50 font-semibold border-b border-white/10">
               <tr>
-                <th class="py-2.5 px-4 w-10">
+                <th class="py-3 px-4 w-10">
                   <input
                     type="checkbox"
                     checked={selectedFolderIds.size === subFolders.length && subFolders.length > 0}
@@ -530,41 +585,56 @@
                         selectedFolderIds = new Set(subFolders.map((f) => f.id));
                       }
                     }}
-                    class="rounded bg-slate-800 border-slate-700"
+                    class="rounded bg-black border-white/20"
                   />
                 </th>
-                <th class="py-2.5 px-4">Name</th>
-                <th class="py-2.5 px-4">Last modified</th>
-                <th class="py-2.5 px-4 text-right">Actions</th>
+                <th class="py-3 px-4">Name</th>
+                <th class="py-3 px-4">Items</th>
+                <th class="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-[var(--color-border-default)]">
+            <tbody class="divide-y divide-white/10">
               {#each subFolders as folder (folder.id)}
                 {@const isFolderSelected = selectedFolderIds.has(folder.id)}
+                {@const folderDiagramCount = diagrams.filter(d => d.folderId === folder.id && !d.isDeleted).length}
                 <tr
                   onclick={() => onSelectFolder(folder.id)}
-                  class="hover:bg-[var(--color-surface-subtle)]/50 cursor-pointer transition-colors {isFolderSelected ? 'bg-indigo-500/10' : ''}"
+                  class="hover:bg-white/5 cursor-pointer transition-colors {isFolderSelected ? 'bg-amber-500/10' : ''}"
                 >
-                  <td class="py-2.5 px-4 w-10" onclick={(e) => e.stopPropagation()}>
+                  <td class="py-3 px-4 w-10" onclick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={isFolderSelected}
-                      onchange={(e) => toggleSelectFolder(folder.id, e)}
-                      class="rounded bg-slate-800 border-slate-700"
+                      onchange={(e) => toggleSelectFolder(folder.id, e as unknown as MouseEvent)}
+                      class="rounded bg-black border-white/20"
                     />
                   </td>
-                  <td class="py-2.5 px-4 font-semibold text-[var(--color-text-primary)] flex items-center gap-2.5">
-                    <FolderIcon size={16} class="text-[var(--color-text-muted)]" />
-                    <span>{folder.name}</span>
+                  <td class="py-3 px-4 font-semibold text-white">
+                    <div class="flex items-center gap-2.5">
+                      <FolderIcon size={16} class="text-amber-400" />
+                      <span>{folder.name}</span>
+                    </div>
                   </td>
-                  <td class="py-2.5 px-4 text-[var(--color-text-muted)]">Recently</td>
-                  <td class="py-2.5 px-4 text-right" onclick={(e) => e.stopPropagation()}>
-                    <button
-                      onclick={() => onDeleteFolder(folder.id)}
-                      class="text-red-400 hover:underline"
-                    >
-                      Delete
-                    </button>
+                  <td class="py-3 px-4 text-white/50 font-['IBM_Plex_Mono',monospace]">
+                    {folderDiagramCount} items
+                  </td>
+                  <td class="py-3 px-4 text-right" onclick={(e) => e.stopPropagation()}>
+                    <div class="flex items-center justify-end gap-1">
+                      <button
+                        onclick={() => onRenameFolder(folder.id, folder.name)}
+                        class="p-1 rounded-lg text-white/40 hover:text-amber-400 hover:bg-white/10 transition-colors"
+                        title="Rename folder"
+                      >
+                        <Edit3 size={13} />
+                      </button>
+                      <button
+                        onclick={() => onDeleteFolder(folder.id)}
+                        class="p-1 rounded-lg text-white/40 hover:text-red-400 hover:bg-white/10 transition-colors"
+                        title="Delete folder"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               {/each}
@@ -575,220 +645,159 @@
     </div>
   {/if}
 
-  <!-- Files Section -->
+  <!-- Files / Diagrams Section -->
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h3 class="text-xs font-semibold text-[var(--color-text-secondary)]">Files</h3>
+      <div class="flex items-center gap-2">
+        <h3 class="text-xs font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
+          Diagrams ({filteredDiagrams.length})
+        </h3>
+      </div>
+
+      {#if filteredDiagrams.length > 0}
+        <button
+          onclick={selectAllDiagrams}
+          class="text-xs text-white/50 hover:text-white transition-colors cursor-pointer"
+        >
+          {selectedDiagramIds.size === filteredDiagrams.length ? 'Deselect all' : 'Select all'}
+        </button>
+      {/if}
     </div>
 
-    {#if filteredDiagrams.length === 0}
-      <div class="p-12 text-center border border-dashed border-[var(--color-border-default)] rounded-xl space-y-3 bg-[var(--color-surface-card)]">
-        <div class="w-12 h-12 mx-auto rounded-full bg-[var(--color-surface-subtle)] flex items-center justify-center text-[var(--color-text-muted)]">
-          <FolderOpen class="w-6 h-6" />
-        </div>
-        <div class="text-sm font-semibold text-[var(--color-text-primary)]">No diagrams found</div>
-        <p class="text-xs text-[var(--color-text-secondary)] max-w-sm mx-auto">
-          {searchQuery ? 'No diagrams match your search query.' : 'Get started by creating your first Mermaid diagram.'}
-        </p>
-        <button
-          onclick={() => onCreateDiagram(activeFolderId)}
-          class="px-4 py-2 text-xs font-medium rounded-lg bg-[var(--color-brass)] text-white hover:opacity-90 transition-opacity"
-        >
-          + Create Diagram
-        </button>
-      </div>
-    {:else if viewMode === 'grid'}
-      <!-- Grid View -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-        {#each filteredDiagrams as diagram (diagram.id)}
-          {@const isSelected = selectedDiagramIds.has(diagram.id)}
-          <div class="relative group">
-            <!-- Multi-select Checkbox Overlay -->
-            <button
-              onclick={(e) => toggleSelectDiagram(diagram.id, e)}
-              class="absolute top-2 left-2 z-20 p-1.5 rounded-lg bg-black/60 backdrop-blur-sm text-white opacity-0 group-hover:opacity-100 transition-opacity {isSelected ? 'opacity-100 text-indigo-400' : ''}"
-              title="Select diagram"
-            >
-              {#if isSelected}
-                <CheckSquare size={16} class="text-indigo-400 fill-indigo-400/20" />
-              {:else}
-                <Square size={16} />
-              {/if}
-            </button>
-
+    {#if filteredDiagrams.length > 0}
+      {#if viewMode === 'grid'}
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+          {#each filteredDiagrams as diagram (diagram.id)}
+            {@const isDiagramSelected = selectedDiagramIds.has(diagram.id)}
             <DiagramCard
               {diagram}
               isFavorite={favoriteIds.has(diagram.id)}
-              onSelect={onSelectDiagram}
-              onToggleFavorite={onToggleFavorite}
-              onShare={onShareDiagram}
-              onDelete={onDeleteDiagram}
+              onSelect={() => onSelectDiagram(diagram.id)}
+              onToggleFavorite={() => onToggleFavorite(diagram.id)}
+              onShare={() => onShareDiagram(diagram)}
+              onRename={() => onRenameDiagram(diagram.id, diagram.title)}
+              onDelete={(id: string) => onDeleteDiagram(id)}
             />
-          </div>
-        {/each}
-      </div>
-    {:else}
-      <!-- List View -->
-      <div class="border border-[var(--color-border-default)] rounded-xl overflow-hidden bg-[var(--color-surface-card)]">
-        <table class="w-full text-left text-xs">
-          <thead class="bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] font-medium border-b border-[var(--color-border-default)]">
-            <tr>
-              <th class="py-3 px-4 w-10">
-                <input
-                  type="checkbox"
-                  checked={selectedDiagramIds.size === filteredDiagrams.length && filteredDiagrams.length > 0}
-                  onchange={() => {
-                    if (selectedDiagramIds.size === filteredDiagrams.length) {
-                      selectedDiagramIds = new Set();
-                    } else {
-                      selectedDiagramIds = new Set(filteredDiagrams.map((d) => d.id));
-                    }
-                  }}
-                  class="rounded bg-slate-800 border-slate-700"
-                />
-              </th>
-              <th class="py-3 px-4">Title</th>
-              <th class="py-3 px-4">Created</th>
-              <th class="py-3 px-4">Status</th>
-              <th class="py-3 px-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-[var(--color-border-default)]">
-            {#each filteredDiagrams as diagram (diagram.id)}
-              {@const isSelected = selectedDiagramIds.has(diagram.id)}
-              <tr
-                onclick={() => onSelectDiagram(diagram.id)}
-                class="hover:bg-[var(--color-surface-subtle)]/50 cursor-pointer transition-colors {isSelected ? 'bg-indigo-500/10' : ''}"
-              >
-                <td class="py-3 px-4" onclick={(e) => e.stopPropagation()}>
+          {/each}
+        </div>
+      {:else}
+        <!-- List View for Diagrams -->
+        <div class="border border-white/15 rounded-2xl overflow-hidden bg-[#0F1117] text-xs">
+          <table class="w-full text-left">
+            <thead class="bg-white/5 text-white/50 font-semibold border-b border-white/10">
+              <tr>
+                <th class="py-3 px-4 w-10">
                   <input
                     type="checkbox"
-                    checked={isSelected}
-                    onchange={(e) => toggleSelectDiagram(diagram.id, e)}
-                    class="rounded bg-slate-800 border-slate-700"
+                    checked={selectedDiagramIds.size === filteredDiagrams.length && filteredDiagrams.length > 0}
+                    onchange={selectAllDiagrams}
+                    class="rounded bg-black border-white/20"
                   />
-                </td>
-                <td class="py-3 px-4 font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-                  <FileText class="w-4 h-4 text-[var(--color-brass-text)] shrink-0" />
-                  <span>{diagram.title || 'Untitled diagram'}</span>
-                </td>
-                <td class="py-3 px-4 text-[var(--color-text-muted)]">
-                  {new Date(diagram.createdAt).toLocaleDateString()}
-                </td>
-                <td class="py-3 px-4">
-                  {#if diagram.isShared}
-                    <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-500">Shared</span>
-                  {:else}
-                    <span class="px-2 py-0.5 rounded text-[10px] font-medium bg-[var(--color-surface-subtle)] text-[var(--color-text-muted)]">Private</span>
-                  {/if}
-                </td>
-                <td class="py-3 px-4 text-right" onclick={(e) => e.stopPropagation()}>
-                  <button
-                    onclick={() => onShareDiagram(diagram)}
-                    class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                  >
-                    Share
-                  </button>
-                  <button
-                    onclick={() => onDeleteDiagram(diagram.id)}
-                    class="px-2 py-1 text-xs text-red-500 hover:underline"
-                  >
-                    Delete
-                  </button>
-                </td>
+                </th>
+                <th class="py-3 px-4">Title</th>
+                <th class="py-3 px-4">Last modified</th>
+                <th class="py-3 px-4 text-right">Actions</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
+            </thead>
+            <tbody class="divide-y divide-white/10">
+              {#each filteredDiagrams as diagram (diagram.id)}
+                {@const isDiagramSelected = selectedDiagramIds.has(diagram.id)}
+                <tr
+                  onclick={() => onSelectDiagram(diagram.id)}
+                  class="hover:bg-white/5 cursor-pointer transition-colors {isDiagramSelected ? 'bg-amber-500/10' : ''}"
+                >
+                  <td class="py-3 px-4 w-10" onclick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={isDiagramSelected}
+                      onchange={(e) => toggleSelectDiagram(diagram.id, e as unknown as MouseEvent)}
+                      class="rounded bg-black border-white/20"
+                    />
+                  </td>
+                  <td class="py-3 px-4 font-semibold text-white">
+                    <div class="flex items-center gap-2.5">
+                      <FileText size={16} class="text-blue-400" />
+                      <span>{diagram.title || 'Untitled diagram'}</span>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4 text-white/50 font-['IBM_Plex_Mono',monospace]">
+                    {formatTimeAgo(diagram.updatedAt)}
+                  </td>
+                  <td class="py-3 px-4 text-right" onclick={(e) => e.stopPropagation()}>
+                    <div class="flex items-center justify-end gap-1">
+                      <button
+                        onclick={() => onRenameDiagram(diagram.id, diagram.title)}
+                        class="p-1 rounded-lg text-white/40 hover:text-amber-400 hover:bg-white/10 transition-colors"
+                        title="Rename diagram"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                      <button
+                        onclick={() => onToggleFavorite(diagram.id)}
+                        class="p-1 rounded-lg text-white/40 hover:text-amber-400 hover:bg-white/10 transition-colors"
+                        title="Toggle Favorite"
+                      >
+                        <FavoriteIcon active={favoriteIds.has(diagram.id)} size={14} />
+                      </button>
+                      <button
+                        onclick={() => onShareDiagram(diagram)}
+                        class="p-1 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                        title="Share diagram"
+                      >
+                        <Share2 size={14} />
+                      </button>
+                      <button
+                        onclick={() => onDeleteDiagram(diagram.id)}
+                        class="p-1 rounded-lg text-white/40 hover:text-red-400 hover:bg-white/10 transition-colors"
+                        title="Delete diagram"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    {:else}
+      <!-- Empty State -->
+      <div class="p-12 rounded-2xl border border-dashed border-white/15 bg-[#0F1117] text-center space-y-3">
+        <div class="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-white/40">
+          <FileText size={22} />
+        </div>
+        <div class="space-y-1">
+          <h4 class="text-sm font-bold text-white">No diagrams found</h4>
+          <p class="text-xs text-white/50">
+            {searchQuery ? 'No diagrams match your search query.' : 'Get started by creating your first Mermaid diagram.'}
+          </p>
+        </div>
+        <button
+          onclick={() => onCreateDiagram(activeFolderId)}
+          class="px-4 py-2 text-xs font-bold rounded-xl bg-white text-black hover:bg-slate-200 transition-colors shadow-md inline-flex items-center gap-2 cursor-pointer btn-premium"
+        >
+          <Plus size={14} />
+          <span>Create New Diagram</span>
+        </button>
       </div>
     {/if}
   </div>
 
-  <!-- Bottom Floating Multi-Selection Batch Action Bar (Folders + Diagrams) -->
-  {#if totalSelectedCount > 0}
-    <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-[#252636] border border-slate-700/80 shadow-2xl rounded-2xl px-5 py-2 flex items-center gap-4 text-xs text-white animate-in slide-in-from-bottom-4 duration-200">
-      <div class="font-semibold text-slate-200 flex items-center gap-2">
-        <span>{totalSelectedCount} selected</span>
-        <button
-          onclick={selectAllItems}
-          class="text-indigo-400 hover:underline text-[11px] font-medium"
-        >
-          {totalSelectedCount === (subFolders.length + filteredDiagrams.length) ? 'Deselect all' : 'Select all'}
-        </button>
-      </div>
+  <!-- Multi-Action Modals -->
+  <MultiExportModal
+    open={exportModalOpen}
+    selectedIds={selectedDiagramIds}
+    diagrams={diagrams.filter((d) => selectedDiagramIds.has(d.id))}
+    onclose={() => (exportModalOpen = false)}
+  />
 
-      <div class="h-4 w-px bg-slate-700"></div>
-
-      <!-- Action Buttons with Tooltips -->
-      <div class="flex items-center gap-1">
-        <!-- Export Button (Diagrams only) -->
-        {#if selectedDiagramIds.size > 0}
-          <button
-            onclick={() => (exportModalOpen = true)}
-            title="Export Diagrams"
-            class="p-2 rounded-xl hover:bg-slate-700/80 text-slate-300 hover:text-white transition-colors relative group"
-          >
-            <Upload size={16} />
-          </button>
-        {/if}
-
-        <!-- Duplicate Button (Diagrams only) -->
-        {#if selectedDiagramIds.size > 0}
-          <button
-            onclick={duplicateSelectedDiagrams}
-            title="Duplicate Diagrams"
-            class="p-2 rounded-xl hover:bg-slate-700/80 text-slate-300 hover:text-white transition-colors relative group"
-          >
-            <Copy size={16} />
-          </button>
-        {/if}
-
-        <!-- Move Button -->
-        <button
-          onclick={() => (moveModalOpen = true)}
-          title="Move Selected Items to Folder"
-          class="p-2 rounded-xl hover:bg-slate-700/80 text-slate-300 hover:text-white transition-colors relative group"
-        >
-          <FolderInput size={16} />
-        </button>
-
-        <!-- Delete Button (Folders & Diagrams) -->
-        <button
-          onclick={deleteSelectedItems}
-          title="Delete Selected Items"
-          class="p-2 rounded-xl hover:bg-red-500/20 text-red-400 transition-colors relative group"
-        >
-          <Trash2 size={16} />
-        </button>
-      </div>
-
-      <div class="h-4 w-px bg-slate-700"></div>
-
-      <!-- Close Selection Button -->
-      <button
-        onclick={clearSelection}
-        title="Cancel Selection"
-        class="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
-      >
-        <X size={16} />
-      </button>
-    </div>
-  {/if}
+  <MultiMoveModal
+    open={moveModalOpen}
+    selectedCount={totalSelectedCount}
+    folders={folders.filter((f) => !f.isDeleted)}
+    excludedFolderIds={Array.from(selectedFolderIds)}
+    onclose={() => (moveModalOpen = false)}
+    onMove={handleConfirmMove}
+  />
 </div>
-
-<!-- Multi Export Modal -->
-<MultiExportModal
-  open={exportModalOpen}
-  {diagrams}
-  selectedIds={selectedDiagramIds}
-  onclose={() => (exportModalOpen = false)}
-/>
-
-<!-- Multi Move Modal -->
-<MultiMoveModal
-  open={moveModalOpen}
-  {folders}
-  selectedCount={totalSelectedCount}
-  onMove={handleConfirmMove}
-  onclose={() => (moveModalOpen = false)}
-/>

@@ -32,6 +32,7 @@ export const load: PageLoad = async () => {
     id: f.id,
     userId: f.user_id,
     parentId: f.parent_id,
+    organizationId: f.organization_id || null,
     name: f.name,
     isDeleted: f.is_deleted || false,
     deletedAt: f.deleted_at || null,
@@ -43,6 +44,7 @@ export const load: PageLoad = async () => {
     id: d.id,
     userId: d.user_id,
     folderId: d.folder_id,
+    organizationId: d.organization_id || null,
     title: d.title,
     code: d.code,
     config: d.config || {},
@@ -55,10 +57,40 @@ export const load: PageLoad = async () => {
     updatedAt: d.updated_at
   }));
 
+  // Fetch Organizations for User
+  const { data: orgsData } = await supabase
+    .from('organizations')
+    .select('id, name, slug, owner_id')
+    .order('created_at', { ascending: true });
+
+  const organizations = (orgsData || []).map((o: any) => ({
+    id: o.id,
+    name: o.name,
+    slug: o.slug,
+    ownerId: o.owner_id
+  }));
+
+  // Fetch User Profile
+  const { data: profileData } = await supabase
+    .from('profiles')
+    .select('full_name, avatar_url, headline')
+    .eq('id', session.user.id)
+    .maybeSingle();
+
+  const userProfile = profileData
+    ? {
+        fullName: profileData.full_name || '',
+        headline: profileData.headline || 'Diagram Architect',
+        avatarUrl: profileData.avatar_url || ''
+      }
+    : null;
+
   return {
     session,
     folders,
-    diagrams
+    diagrams,
+    organizations,
+    userProfile
   };
 };
 

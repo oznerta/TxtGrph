@@ -41,7 +41,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="relative inline-block w-full text-left font-['Instrument_Sans',sans-serif] {className}">
+<div class="relative inline-block w-full text-left font-['Instrument_Sans',sans-serif] {className} {isOpen ? 'z-[60]' : ''}">
   <!-- Trigger Button -->
   <button
     {id}

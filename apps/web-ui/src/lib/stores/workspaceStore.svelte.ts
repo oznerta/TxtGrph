@@ -2,6 +2,7 @@ export interface Folder {
   id: string;
   userId: string;
   parentId: string | null;
+  organizationId?: string | null;
   name: string;
   color?: string | null;
   icon?: string | null;
@@ -15,6 +16,7 @@ export interface Diagram {
   id: string;
   userId: string;
   folderId: string | null;
+  organizationId?: string | null;
   title: string;
   code: string;
   config: Record<string, unknown>;
@@ -30,8 +32,8 @@ export interface Diagram {
 export interface Organization {
   id: string;
   name: string;
-  slug: string;
-  ownerId: string;
+  slug?: string;
+  ownerId?: string;
 }
 
 export interface OrganizationMember {
@@ -89,6 +91,13 @@ export class WorkspaceStore {
     this.activeDiagramId = null;
   }
 
+  // Select active space (Personal vs Team Organization space)
+  selectOrg(orgId: string | null) {
+    this.activeOrgId = orgId;
+    this.activeFolderId = null;
+    this.activeDiagramId = null;
+  }
+
   // Initialize store from server load data
   init(folders: Folder[], diagrams: Diagram[], initialDiagramId?: string | null, orgs: Organization[] = []) {
     this.folders = folders;
@@ -133,9 +142,28 @@ export class WorkspaceStore {
     }
   }
 
-  // Active Folders derived lookup (non-deleted)
+  // Rename specific diagram by ID
+  renameDiagram(id: string, newTitle: string) {
+    const target = this.diagrams.find((d) => d.id === id);
+    if (target) {
+      target.title = newTitle;
+    }
+  }
+
+  // Rename specific folder by ID
+  renameFolder(id: string, newName: string) {
+    const target = this.folders.find((f) => f.id === id);
+    if (target) {
+      target.name = newName;
+    }
+  }
+
+
+  // Active Folders derived lookup (non-deleted & current space)
   get activeFolders(): Folder[] {
-    return this.folders.filter((f) => !f.isDeleted);
+    return this.folders.filter(
+      (f) => !f.isDeleted && (this.activeOrgId ? f.organizationId === this.activeOrgId : !f.organizationId)
+    );
   }
 
   // Trashed items
@@ -151,23 +179,38 @@ export class WorkspaceStore {
     return this.trashedFolders.length + this.trashedDiagrams.length;
   }
 
-  // Filter active diagrams and folders by search query
+  // Filter active diagrams and folders by search query and active space
   get filteredDiagrams(): Diagram[] {
     const query = this.searchQuery.trim().toLowerCase();
-    if (!query) return this.diagrams.filter((d) => !d.isDeleted);
-    return this.diagrams.filter(
-      (d) => !d.isDeleted && (d.title.toLowerCase().includes(query) || d.code.toLowerCase().includes(query))
+    let base = this.diagrams.filter(
+      (d) => !d.isDeleted && (this.activeOrgId ? d.organizationId === this.activeOrgId : !d.organizationId)
+    );
+    if (!query) return base;
+    return base.filter(
+      (d) => d.title.toLowerCase().includes(query) || d.code.toLowerCase().includes(query)
     );
   }
 
-  // Get child folders of parent (null for root), filtering out deleted folders
-  getChildFolders(parentId: string | null = null): Folder[] {
-    return this.folders.filter((f) => f.parentId === parentId && !f.isDeleted);
+  // Get child folders of parent (null for root), filtering out deleted folders and matching current or target space
+  getChildFolders(parentId: string | null = null, orgId?: string | null): Folder[] {
+    const targetOrgId = orgId !== undefined ? orgId : this.activeOrgId;
+    return this.folders.filter(
+      (f) =>
+        f.parentId === parentId &&
+        !f.isDeleted &&
+        (targetOrgId ? f.organizationId === targetOrgId : !f.organizationId)
+    );
   }
 
-  // Get diagrams in folder (null for root), filtering out deleted diagrams
-  getFolderDiagrams(folderId: string | null = null): Diagram[] {
-    return this.diagrams.filter((d) => d.folderId === folderId && !d.isDeleted);
+  // Get diagrams in folder (null for root), filtering out deleted diagrams and matching current or target space
+  getFolderDiagrams(folderId: string | null = null, orgId?: string | null): Diagram[] {
+    const targetOrgId = orgId !== undefined ? orgId : this.activeOrgId;
+    return this.diagrams.filter(
+      (d) =>
+        d.folderId === folderId &&
+        !d.isDeleted &&
+        (targetOrgId ? d.organizationId === targetOrgId : !d.organizationId)
+    );
   }
 
   // Toggle Diagram Share state

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Diagram } from '@txtgrph/core';
   import DiagramThumbnail from './DiagramThumbnail.svelte';
-  import { Share2, Trash2, MoreVertical } from 'lucide-svelte';
+  import { Share2, Trash2, MoreVertical, Edit3 } from 'lucide-svelte';
   import FavoriteIcon from '$lib/components/ui/FavoriteIcon.svelte';
 
   let {
@@ -10,6 +10,7 @@
     onSelect = (id: string) => {},
     onToggleFavorite = (id: string) => {},
     onShare = (diagram: Diagram) => {},
+    onRename = (diagram: Diagram) => {},
     onDelete = (id: string) => {},
   } = $props();
 
@@ -34,7 +35,7 @@
   tabindex="0"
   onclick={() => onSelect(diagram.id)}
   onkeydown={(e) => e.key === 'Enter' && onSelect(diagram.id)}
-  class="group cursor-pointer rounded-2xl border border-white/15 bg-[#0F1117] hover:border-white/30 hover:shadow-2xl shadow-lg transition-all duration-200 flex flex-col overflow-hidden relative select-none glass-panel-hover"
+  class="group cursor-pointer rounded-2xl border border-white/15 bg-[#0F1117] hover:border-white/30 hover:shadow-2xl shadow-lg transition-all duration-200 flex flex-col relative select-none glass-panel-hover {showMenu ? 'z-[50] relative !overflow-visible' : 'relative z-10 overflow-hidden'}"
 >
   <!-- Thumbnail Header Container -->
   <div class="relative w-full h-[155px] bg-[#090A0F] flex items-center justify-center p-2">
@@ -83,6 +84,15 @@
           class="absolute right-0 bottom-full mb-1 w-36 rounded-xl bg-[#1E202C] border border-slate-700 shadow-2xl py-1 z-20 text-xs font-['Instrument_Sans',sans-serif]"
           onclick={(e) => e.stopPropagation()}
         >
+          <button
+            onclick={() => {
+              showMenu = false;
+              onRename(diagram);
+            }}
+            class="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-slate-800 text-white"
+          >
+            <Edit3 class="w-3.5 h-3.5 text-amber-400" /> Rename
+          </button>
           <button
             onclick={() => {
               showMenu = false;

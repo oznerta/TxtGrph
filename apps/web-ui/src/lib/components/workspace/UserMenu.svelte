@@ -1,5 +1,6 @@
 <script lang="ts">
   import { User, Settings, KeyRound, LogOut, ChevronDown } from 'lucide-svelte';
+  import { profileStore } from '$lib/stores/profileStore.svelte';
 
   let {
     userEmail = '',
@@ -9,9 +10,20 @@
 
   let isOpen = $state(false);
 
-  const displayName = $derived(userName && userName.trim() ? userName : (userEmail ? userEmail.split('@')[0] : 'Developer'));
+  const displayName = $derived(
+    profileStore.displayName !== 'User Account'
+      ? profileStore.displayName
+      : userName && userName.trim()
+      ? userName
+      : userEmail
+      ? userEmail.split('@')[0]
+      : 'Developer'
+  );
 
   const initials = $derived.by(() => {
+    if (profileStore.initials && profileStore.initials !== 'U') {
+      return profileStore.initials;
+    }
     if (userName && userName.trim()) {
       const parts = userName.trim().split(' ');
       if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
@@ -60,7 +72,7 @@
       <!-- User Info Header -->
       <div class="px-4 py-3 border-b border-white/10 space-y-0.5">
         <div class="font-bold text-white text-xs truncate">{displayName}</div>
-        <div class="text-[11px] text-white/50 truncate font-['IBM_Plex_Mono',monospace]">{userEmail}</div>
+        <div class="text-[11px] text-amber-400/80 truncate font-['Instrument_Sans',sans-serif]">{profileStore.headline || userEmail}</div>
       </div>
 
       <!-- Menu Options -->

@@ -234,7 +234,7 @@
   >
     <!-- Modal Card -->
     <div
-      class="w-full max-w-lg overflow-hidden rounded-2xl border border-white/15 bg-[#0F1117] p-6 shadow-2xl transition-all text-white max-h-[85vh] flex flex-col"
+      class="w-full max-w-lg rounded-2xl border border-white/15 bg-[#0F1117] p-6 shadow-2xl transition-all text-white max-h-[85vh] flex flex-col relative z-10"
       role="dialog"
       tabindex="-1"
       aria-labelledby="share-modal-title"

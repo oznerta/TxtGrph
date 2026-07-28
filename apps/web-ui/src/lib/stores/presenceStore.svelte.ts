@@ -3,6 +3,7 @@ import { createSupabaseBrowserClient } from '$lib/supabase/client';
 export interface PresenceUser {
   user_id: string;
   full_name: string;
+  headline?: string;
   email: string;
   avatar_url?: string | null;
   color: string;
@@ -26,7 +27,7 @@ class PresenceStore {
   activeChannel = $state<any>(null);
   activeDiagramId = $state<string | null>(null);
 
-  joinDiagram(diagramId: string, currentUser: { id: string; email: string; fullName?: string; avatarUrl?: string; role?: 'owner' | 'editor' | 'viewer' }) {
+  joinDiagram(diagramId: string, currentUser: { id: string; email: string; fullName?: string; headline?: string; avatarUrl?: string; role?: 'owner' | 'editor' | 'viewer' }) {
     if (this.activeDiagramId === diagramId && this.activeChannel) return;
 
     this.leaveDiagram();
@@ -49,6 +50,7 @@ class PresenceStore {
     const presencePayload: PresenceUser = {
       user_id: currentUser.id,
       full_name: displayName,
+      headline: currentUser.headline || 'Diagram Architect',
       email: currentUser.email,
       avatar_url: currentUser.avatarUrl || null,
       color: userColor,

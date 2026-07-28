@@ -96,7 +96,7 @@
   <div class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150 select-none font-['Instrument_Sans',sans-serif]">
     <div
       role="presentation"
-      class="w-full max-w-md rounded-2xl bg-[#0F1117] border border-white/15 shadow-2xl overflow-hidden text-white p-6 space-y-5"
+      class="w-full max-w-md rounded-2xl bg-[#0F1117] border border-white/15 shadow-2xl overflow-visible text-white p-6 space-y-5 relative z-10"
       onclick={(e) => e.stopPropagation()}
     >
       <!-- Header -->
@@ -134,6 +134,7 @@
           <CustomSelect
             options={formatOptions}
             bind:value={selectedFormat}
+            dropUp={true}
           />
         </div>
 

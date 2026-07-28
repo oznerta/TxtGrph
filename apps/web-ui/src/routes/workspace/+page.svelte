@@ -3,6 +3,7 @@
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { workspaceStore } from '$lib/stores/workspaceStore.svelte';
   import { presenceStore } from '$lib/stores/presenceStore.svelte';
+  import { profileStore } from '$lib/stores/profileStore.svelte';
   import FolderTree from '$lib/components/workspace/FolderTree.svelte';
   import FavoriteIcon from '$lib/components/ui/FavoriteIcon.svelte';
   import DiagramCanvas from '$lib/components/workspace/DiagramCanvas.svelte';
@@ -62,6 +63,7 @@
   import TemplatesModal from '$lib/components/workspace/TemplatesModal.svelte';
   import OrgSettingsModal from '$lib/components/workspace/OrgSettingsModal.svelte';
   import MultiMoveModal from '$lib/components/workspace/MultiMoveModal.svelte';
+  import RenameModal from '$lib/components/workspace/RenameModal.svelte';
   import type { Diagram } from '$lib/stores/workspaceStore.svelte';
   import { goto } from '$app/navigation';
   import mermaid from 'mermaid';
@@ -85,51 +87,113 @@
   let commentsModalOpen = $state(false);
   let multiMoveModalOpen = $state(false);
   let multiMoveModalIds = $state<string[]>([]);
+  let renameModalOpen = $state(false);
+  let renameTargetType = $state<'folder' | 'diagram'>('diagram');
+  let renameTargetId = $state<string | null>(null);
+  let renameTargetName = $state('');
   let activeOrgSettingsId = $state<string | null>(null);
   let activeOrgSettingsName = $state('Team Space');
-  let organizations = $state<{ id: string; name: string }[]>([]);
+  let organizations = $state<{ id: string; name: string; slug?: string; ownerId?: string }[]>([]);
+  const LOCAL_ORGS_KEY = 'txtgrph_local_organizations';
+
+  function getLocalOrgs(): { id: string; name: string; slug?: string; ownerId?: string }[] {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(LOCAL_ORGS_KEY);
+        if (stored) return JSON.parse(stored);
+      } catch (err) {
+        console.error('Failed to load local orgs:', err);
+      }
+    }
+    return [];
+  }
+
+  function saveLocalOrgs(orgs: { id: string; name: string; slug?: string; ownerId?: string }[]) {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(LOCAL_ORGS_KEY, JSON.stringify(orgs));
+      } catch (err) {
+        console.error('Failed to save local orgs:', err);
+      }
+    }
+  }
 
   $effect(() => {
     loadOrganizations();
   });
 
   async function loadOrganizations() {
+    const localOrgs = getLocalOrgs();
+    let dbOrgs: { id: string; name: string; slug?: string; ownerId?: string }[] = [];
+
+    if (data.organizations && data.organizations.length > 0) {
+      dbOrgs = data.organizations.map((o: any) => ({ id: o.id, name: o.name }));
+    }
+
     try {
-      const { data, error } = await supabase
+      const { data: fetchResult, error } = await supabase
         .from('organizations')
         .select('id, name')
         .order('created_at', { ascending: true });
 
-      if (error) throw error;
-      if (data) {
-        organizations = data.map((o: any) => ({ id: o.id, name: o.name }));
+      if (!error && fetchResult && fetchResult.length > 0) {
+        dbOrgs = fetchResult.map((o: any) => ({ id: o.id, name: o.name }));
       }
     } catch (err) {
-      console.error('Failed to load organizations:', err);
+      console.error('Failed to fetch orgs from Supabase:', err);
     }
+
+    const dbIds = new Set(dbOrgs.map((o) => o.id));
+    const merged = [...dbOrgs, ...localOrgs.filter((o) => !dbIds.has(o.id))];
+
+    organizations = merged;
+    workspaceStore.organizations = merged;
+    saveLocalOrgs(merged);
   }
 
   async function handleCreateOrg(name: string) {
     if (!name.trim()) return;
-    try {
-      const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substring(2, 6);
-      const { data, error } = await supabase
-        .from('organizations')
-        .insert({
-          name: name.trim(),
-          slug
-        })
-        .select('id, name')
-        .single();
 
-      if (error) throw error;
-      if (data) {
-        organizations = [...organizations, { id: data.id, name: data.name }];
+    const newOrgId = crypto.randomUUID();
+    const newOrg = { id: newOrgId, name: name.trim() };
+    const userId = data.session?.user?.id;
+
+    if (userId) {
+      try {
+        const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substring(2, 6);
+        const { data: createdOrg, error } = await supabase
+          .from('organizations')
+          .insert({
+            id: newOrgId,
+            name: name.trim(),
+            slug,
+            owner_id: userId
+          })
+          .select('id, name')
+          .single();
+
+        if (error) {
+          console.error('Failed to create organization in Supabase:', error);
+        } else if (createdOrg) {
+          await supabase
+            .from('organization_members')
+            .insert({
+              organization_id: createdOrg.id,
+              user_id: userId,
+              role: 'owner'
+            });
+        }
+      } catch (err) {
+        console.error('Error creating organization:', err);
       }
-      createOrgModalOpen = false;
-    } catch (err) {
-      console.error('Failed to create organization:', err);
     }
+
+    const nextOrgs = [...organizations, newOrg];
+    organizations = nextOrgs;
+    workspaceStore.organizations = nextOrgs;
+    saveLocalOrgs(nextOrgs);
+    workspaceStore.selectOrg(newOrg.id);
+    createOrgModalOpen = false;
   }
 
   let favoriteIds = $state<Set<string>>(new Set());
@@ -145,14 +209,15 @@
   $effect(() => {
     if (workspaceStore.activeDiagram && data.session?.user) {
       const user = data.session.user;
-      const userMeta = user.user_metadata || {};
-      const fullName = userMeta.full_name || userMeta.name || userMeta.display_name || user.email?.split('@')[0];
+      const fullName = profileStore.displayName !== 'User Account' ? profileStore.displayName : (user.email?.split('@')[0] || 'User');
+      const headline = profileStore.headline || 'Diagram Architect';
 
       presenceStore.joinDiagram(workspaceStore.activeDiagram.id, {
         id: user.id,
         email: user.email || '',
-        fullName: fullName,
-        avatarUrl: userMeta.avatar_url,
+        fullName,
+        headline,
+        avatarUrl: profileStore.avatarUrl || user.user_metadata?.avatar_url,
         role: 'owner'
       });
     } else {
@@ -160,7 +225,17 @@
     }
   });
 
-  // Breadcrumb: resolve folder name for active diagram
+  // Breadcrumb: resolve space name & folder name for active diagram
+  let activeSpaceName = $derived.by(() => {
+    const diagram = workspaceStore.activeDiagram;
+    const orgId = diagram?.organizationId || workspaceStore.activeOrgId;
+    if (orgId) {
+      const org = organizations.find((o) => o.id === orgId);
+      return org ? org.name : 'Team space';
+    }
+    return 'Personal files';
+  });
+
   let activeFolderName = $derived.by(() => {
     const diagram = workspaceStore.activeDiagram;
     if (!diagram || !diagram.folderId) return null;
@@ -214,6 +289,9 @@
       isCanvasFullscreen = !!document.fullscreenElement;
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    profileStore.loadFromLocal();
+    profileStore.init(data.userProfile, data.session?.user?.email);
 
     if (data.diagrams && data.diagrams.length > 0) {
       workspaceStore.diagrams = data.diagrams;
@@ -790,72 +868,78 @@
   }
 
   async function handleCreateDiagram(title = 'Untitled Diagram', folderId: string | null = null) {
-    if (!data.session?.user?.id) return;
-
+    const userId = data.session?.user?.id || 'guest-user';
+    const diagramId = crypto.randomUUID();
     const initialCode = `graph TD\n  Start[Start Process] --> Process[Execute Task]\n  Process --> End[Finish]`;
-    const { data: created, error } = await supabase
-      .from('diagrams')
-      .insert({
-        title,
-        folder_id: folderId,
-        user_id: data.session.user.id,
-        code: initialCode
-      })
-      .select()
-      .single();
 
-    if (created && !error) {
-      const newDiagram = {
-        id: created.id,
-        userId: created.user_id,
-        folderId: created.folder_id,
-        title: created.title,
-        code: created.code,
-        config: created.config || {},
-        isShared: created.is_shared || false,
-        shareToken: created.share_token || null,
-        shareUpdatedAt: created.share_updated_at || null,
-        isDeleted: created.is_deleted || false,
-        deletedAt: created.deleted_at || null,
-        createdAt: created.created_at,
-        updatedAt: created.updated_at
-      };
+    const newDiagram = {
+      id: diagramId,
+      userId,
+      folderId,
+      organizationId: workspaceStore.activeOrgId,
+      title,
+      code: initialCode,
+      config: {},
+      isShared: false,
+      isDeleted: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
 
-      workspaceStore.diagrams = [newDiagram, ...workspaceStore.diagrams];
-      workspaceStore.selectDiagram(newDiagram.id);
-      sidebarOpen = false;
+    if (data.session?.user?.id) {
+      try {
+        await supabase
+          .from('diagrams')
+          .insert({
+            id: diagramId,
+            title,
+            folder_id: folderId,
+            user_id: userId,
+            code: initialCode,
+            organization_id: workspaceStore.activeOrgId
+          });
+      } catch (err) {
+        console.error('Failed to insert diagram to Supabase:', err);
+      }
     }
+
+    workspaceStore.diagrams = [newDiagram, ...workspaceStore.diagrams];
+    workspaceStore.selectDiagram(newDiagram.id);
+    sidebarOpen = false;
   }
 
   async function handleCreateFolder(name: string, parentId: string | null = null) {
-    if (!data.session?.user?.id) return;
+    const userId = data.session?.user?.id || 'guest-user';
+    const folderId = crypto.randomUUID();
 
-    const { data: created, error } = await supabase
-      .from('folders')
-      .insert({
-        name,
-        parent_id: parentId,
-        user_id: data.session.user.id
-      })
-      .select()
-      .single();
+    const newFolder = {
+      id: folderId,
+      userId,
+      parentId,
+      organizationId: workspaceStore.activeOrgId,
+      name,
+      isDeleted: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
 
-    if (created && !error) {
-      const newFolder = {
-        id: created.id,
-        userId: created.user_id,
-        parentId: created.parent_id,
-        name: created.name,
-        color: created.color || null,
-        icon: created.icon || null,
-        isDeleted: created.is_deleted || false,
-        deletedAt: created.deleted_at || null,
-        createdAt: created.created_at,
-        updatedAt: created.updated_at
-      };
-
-      workspaceStore.folders = [...workspaceStore.folders, newFolder];
+    if (data.session?.user?.id) {
+      try {
+        await supabase
+          .from('folders')
+          .insert({
+            id: folderId,
+            name,
+            parent_id: parentId,
+            user_id: userId,
+            organization_id: workspaceStore.activeOrgId
+          });
+      } catch (err) {
+        console.error('Failed to insert folder to Supabase:', err);
+      }
     }
+
+    workspaceStore.folders = [...workspaceStore.folders, newFolder];
   }
 
   async function handleDeleteDiagram(id: string) {
@@ -887,7 +971,8 @@
           title: `${source.title} (Copy)`,
           folder_id: source.folderId,
           user_id: data.session.user.id,
-          code: source.code
+          code: source.code,
+          organization_id: source.organizationId || workspaceStore.activeOrgId
         })
         .select()
         .single();
@@ -897,6 +982,7 @@
           id: created.id,
           userId: created.user_id,
           folderId: created.folder_id,
+          organizationId: created.organization_id || null,
           title: created.title,
           code: created.code,
           config: created.config || {},
@@ -928,14 +1014,43 @@
       .in('id', ids);
   }
 
+  async function handleMoveFolders(ids: string[], targetFolderId: string | null) {
+    for (const id of ids) {
+      const target = workspaceStore.folders.find((f) => f.id === id);
+      if (target) {
+        target.parentId = targetFolderId;
+      }
+    }
+
+    await supabase
+      .from('folders')
+      .update({ parent_id: targetFolderId, updated_at: new Date().toISOString() })
+      .in('id', ids);
+  }
+
   async function handleRenameDiagram(id: string, newTitle: string) {
     if (!newTitle.trim()) return;
-    const diagram = workspaceStore.diagrams.find((d) => d.id === id);
-    if (diagram) diagram.title = newTitle.trim();
+    workspaceStore.renameDiagram(id, newTitle.trim());
     await supabase
       .from('diagrams')
       .update({ title: newTitle.trim(), updated_at: new Date().toISOString() })
       .eq('id', id);
+  }
+
+  async function handleRenameFolder(id: string, newName: string) {
+    if (!newName.trim()) return;
+    workspaceStore.renameFolder(id, newName.trim());
+    await supabase
+      .from('folders')
+      .update({ name: newName.trim(), updated_at: new Date().toISOString() })
+      .eq('id', id);
+  }
+
+  function openRenameModal(type: 'folder' | 'diagram', id: string, currentName: string) {
+    renameTargetType = type;
+    renameTargetId = id;
+    renameTargetName = currentName;
+    renameModalOpen = true;
   }
 
   async function handleSignOut() {
@@ -956,6 +1071,8 @@
         onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
         onCreateFolder={handleCreateFolder}
         onCreateDiagram={handleCreateDiagram}
+        onRenameFolder={(id, currentName) => openRenameModal('folder', id, currentName)}
+        onRenameDiagram={(id, currentTitle) => openRenameModal('diagram', id, currentTitle)}
         onDeleteFolder={handleDeleteFolder}
         onDeleteDiagram={handleDeleteDiagram}
         onOpenTrash={() => (trashModalOpen = true)}
@@ -983,6 +1100,7 @@
         readOnly={false}
         saveStatus={workspaceStore.saveStatus}
         isFavorite={favoriteIds.has(workspaceStore.activeDiagramId || '')}
+        spaceName={activeSpaceName}
         folderName={activeFolderName}
         onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
         onCodeChange={handleCodeChange}
@@ -1030,10 +1148,13 @@
           sidebarOpen = false;
           shareModalOpen = true;
         }}
+        onRenameFolder={(id, currentName) => openRenameModal('folder', id, currentName)}
+        onRenameDiagram={(id, currentTitle) => openRenameModal('diagram', id, currentTitle)}
         onDeleteDiagram={(id: string) => handleDeleteDiagram(id)}
         onDeleteFolder={(id: string) => handleDeleteFolder(id)}
         onDuplicateDiagrams={handleDuplicateDiagrams}
         onMoveDiagrams={handleMoveDiagrams}
+        onMoveFolders={handleMoveFolders}
       />
     {/if}
   </main>
@@ -1121,3 +1242,19 @@
   }}
   onclose={() => (multiMoveModalOpen = false)}
 />
+
+<RenameModal
+  open={renameModalOpen}
+  itemType={renameTargetType}
+  itemId={renameTargetId}
+  initialName={renameTargetName}
+  onrename={(id, newName) => {
+    if (renameTargetType === 'folder') {
+      handleRenameFolder(id, newName);
+    } else {
+      handleRenameDiagram(id, newName);
+    }
+  }}
+  onclose={() => (renameModalOpen = false)}
+/>
+

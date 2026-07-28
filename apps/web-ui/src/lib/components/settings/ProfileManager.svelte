@@ -3,6 +3,8 @@
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { User, Check, AlertCircle, Sparkles, Shield, Camera } from 'lucide-svelte';
 
+  import { profileStore } from '$lib/stores/profileStore.svelte';
+
   interface Props {
     userId: string;
     userEmail: string;
@@ -11,9 +13,9 @@
   let { userId, userEmail }: Props = $props();
   const supabase = createSupabaseBrowserClient();
 
-  let fullName = $state('');
-  let avatarUrl = $state('');
-  let headline = $state('Diagram Architect');
+  let fullName = $state(profileStore.fullName || '');
+  let avatarUrl = $state(profileStore.avatarUrl || '');
+  let headline = $state(profileStore.headline || 'Diagram Architect');
   let isSaving = $state(false);
   let saveSuccess = $state(false);
   let errorMessage = $state<string | null>(null);
@@ -32,6 +34,11 @@
   });
 
   async function loadProfile() {
+    profileStore.loadFromLocal();
+    if (profileStore.fullName) fullName = profileStore.fullName;
+    if (profileStore.headline) headline = profileStore.headline;
+    if (profileStore.avatarUrl) avatarUrl = profileStore.avatarUrl;
+
     if (!userId) return;
     try {
       const { data, error } = await supabase
@@ -41,9 +48,10 @@
         .maybeSingle();
 
       if (data) {
-        fullName = data.full_name || '';
-        avatarUrl = data.avatar_url || '';
-        headline = data.headline || 'Diagram Architect';
+        fullName = data.full_name || fullName;
+        avatarUrl = data.avatar_url || avatarUrl;
+        headline = data.headline || headline;
+        profileStore.updateProfile({ fullName, headline, avatarUrl });
       }
     } catch (err) {
       console.warn('Failed to load profile:', err);
@@ -51,7 +59,17 @@
   }
 
   async function handleSaveProfile() {
-    if (!userId) return;
+    profileStore.updateProfile({
+      fullName: fullName.trim(),
+      headline: headline.trim(),
+      avatarUrl: avatarUrl.trim()
+    });
+
+    if (!userId) {
+      saveSuccess = true;
+      setTimeout(() => (saveSuccess = false), 2500);
+      return;
+    }
     isSaving = true;
     errorMessage = null;
 

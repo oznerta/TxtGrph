@@ -48,6 +48,7 @@
     readOnly?: boolean;
     saveStatus?: 'idle' | 'saving' | 'saved' | 'unsaved' | 'error';
     isFavorite?: boolean;
+    spaceName?: string;
     folderName?: string | null;
     isSharedSpace?: boolean;
     allowComments?: boolean;
@@ -77,6 +78,7 @@
     readOnly = false,
     saveStatus = 'saved',
     isFavorite = false,
+    spaceName = 'Personal files',
     folderName = '',
     isSharedSpace = false,
     allowComments = true,
@@ -390,7 +392,7 @@
       {/if}
 
       <div class="flex items-center gap-2 text-xs min-w-0 overflow-hidden">
-        <span class="text-emerald-400 font-bold shrink-0">{isSharedSpace ? 'Shared Space' : 'Personal files'}</span>
+        <span class="text-emerald-400 font-bold shrink-0">{isSharedSpace ? 'Shared Space' : spaceName}</span>
 
         {#if folderName}
           <span class="text-white/25 shrink-0">/</span>

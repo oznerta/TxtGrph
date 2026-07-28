@@ -9,13 +9,16 @@
   let extraCount = $derived(Math.max(0, onlineUsers.length - 4));
 
   function getUserInitials(name: string, email: string): string {
-    if (name && name.trim() && name.trim() !== email) {
-      const parts = name.trim().split(' ');
+    const trimmed = (name || '').trim();
+    if (trimmed && !trimmed.includes('@')) {
+      const parts = trimmed.split(' ');
       if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-      return name.slice(0, 2).toUpperCase();
+      return trimmed.slice(0, 2).toUpperCase();
     }
-    if (email && email.includes('@')) return email.split('@')[0].slice(0, 2).toUpperCase();
-    return 'GV';
+    if (email && email.includes('@')) {
+      return email.split('@')[0].slice(0, 2).toUpperCase();
+    }
+    return 'U';
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -97,11 +100,11 @@
                 </div>
 
                 <div class="min-w-0">
-                  <div class="text-xs font-semibold text-white truncate">
-                    {user.full_name || 'Anonymous User'}
+                  <div class="text-xs font-bold text-white truncate">
+                    {user.full_name || user.email.split('@')[0]}
                   </div>
-                  <div class="text-[10px] text-white/40 truncate">
-                    {user.email}
+                  <div class="text-[10.5px] text-amber-400/80 truncate font-['Instrument_Sans',sans-serif]">
+                    {user.headline || user.email}
                   </div>
                 </div>
               </div>
