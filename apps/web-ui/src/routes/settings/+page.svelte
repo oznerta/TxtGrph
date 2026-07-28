@@ -3,6 +3,7 @@
   import { encryptApiKey, generateKeyHint } from '$lib/crypto';
   import { AIRouter, type AIProvider } from '@txtgrph/ai-router';
   import TokenManager from '$lib/components/settings/TokenManager.svelte';
+  import ProfileManager from '$lib/components/settings/ProfileManager.svelte';
   import type { UserKeyRecord } from './+page.js';
 
   let { data } = $props();
@@ -196,6 +197,9 @@
         </a>
       </div>
     {:else}
+      <!-- User Profile Identity -->
+      <ProfileManager userId={session.user.id} userEmail={session.user.email || ''} />
+
       <!-- Security Notice -->
       <div class="p-4 rounded-lg bg-[var(--color-info-bg)] text-[var(--color-info-text)] text-sm space-y-1">
         <div class="font-semibold flex items-center gap-2">

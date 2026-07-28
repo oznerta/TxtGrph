@@ -10,9 +10,13 @@ export function createSupabaseServerClient(event: RequestEvent) {
       cookies: {
         getAll: () => event.cookies.getAll(),
         setAll: (cookiesToSet: Array<{ name: string; value: string; options: any }>) => {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            event.cookies.set(name, value, { ...options, path: '/' });
-          });
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              event.cookies.set(name, value, { ...options, path: '/' });
+            });
+          } catch {
+            // The `setAll` method was called from a Server Component / late response context.
+          }
         },
       },
     }

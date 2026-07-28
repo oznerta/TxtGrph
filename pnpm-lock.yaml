@@ -62,6 +62,9 @@ importers:
       '@txtgrph/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@txtgrph/mcp-server':
+        specifier: workspace:*
+        version: link:../../packages/mcp-server
       clsx:
         specifier: ^2.1.1
         version: 2.1.1

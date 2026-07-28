@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { KeyRound, Plus, Trash2, Copy, Check, Loader2, Server, Terminal, Code2, ShieldCheck, X } from 'lucide-svelte';
 
-  export interface McpTokenRecord {
+  interface McpTokenRecord {
     id: string;
     name: string;
     token_prefix: string;
@@ -21,6 +22,10 @@
   let isCreating = $state(false);
   let createdRawToken = $state<string | null>(null);
   let isCopied = $state(false);
+
+  // Guide Snippet Tab State
+  let activeGuideTab = $state<'claude' | 'cursor'>('claude');
+  let isSnippetCopied = $state(false);
 
   async function fetchTokens() {
     try {
@@ -107,159 +112,254 @@
     }, 2000);
   }
 
+  let claudeSnippet = $derived(`{
+  "mcpServers": {
+    "txtgrph": {
+      "command": "npx",
+      "args": ["-y", "@txtgrph/mcp-server"],
+      "env": {
+        "TXTGRPH_API_KEY": "${tokens[0]?.token_prefix || 'txtg_live_...'}",
+        "TXTGRPH_BASE_URL": "http://localhost:5173"
+      }
+    }
+  }
+}`);
+
+  let cursorSnippet = $derived(`{
+  "mcp": {
+    "servers": {
+      "txtgrph": {
+        "url": "http://localhost:5173/api/mcp",
+        "headers": {
+          "Authorization": "Bearer ${tokens[0]?.token_prefix || 'txtg_live_...'}"
+        }
+      }
+    }
+  }
+}`);
+
+  function copySnippet() {
+    const text = activeGuideTab === 'claude' ? claudeSnippet : cursorSnippet;
+    navigator.clipboard.writeText(text);
+    isSnippetCopied = true;
+    setTimeout(() => {
+      isSnippetCopied = false;
+    }, 2000);
+  }
+
   function formatDate(isoStr: string | null) {
     if (!isoStr) return 'Never';
     return new Date(isoStr).toLocaleDateString(undefined, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
     });
   }
 </script>
 
-<section class="p-6 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-surface-card)] space-y-6">
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-    <div>
-      <h2 class="text-base font-semibold text-[var(--color-text-primary)]">Public REST API & MCP Access Tokens</h2>
-      <p class="text-xs text-[var(--color-text-secondary)] mt-1">
-        Personal access tokens for connecting external AI coding tools (Claude Desktop, Cursor, Custom Agents) to your TxtGrph workspace.
-      </p>
+<div class="space-y-6 w-full">
+  <!-- Tokens List Card -->
+  <div class="p-6 rounded-3xl bg-[#0F111A] border border-white/10 space-y-5">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div>
+        <h3 class="text-sm font-bold text-white">Personal Access Tokens</h3>
+        <p class="text-xs text-white/50 mt-0.5">
+          Tokens grant access to REST API endpoints and Model Context Protocol (MCP) servers.
+        </p>
+      </div>
+      <button
+        onclick={openCreateModal}
+        class="px-4 py-2 text-xs font-bold rounded-xl bg-amber-400 hover:bg-amber-300 text-black transition-colors shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
+      >
+        <Plus size={14} />
+        <span>Generate New Token</span>
+      </button>
     </div>
-    <button
-      onclick={openCreateModal}
-      class="px-3 py-1.5 text-xs font-medium rounded bg-[var(--color-brass)] text-white hover:opacity-90 self-start sm:self-auto shrink-0"
-    >
-      + Generate New Token
-    </button>
+
+    {#if isLoading}
+      <div class="py-8 text-center text-xs text-amber-400/80 font-['IBM_Plex_Mono',monospace] flex items-center justify-center gap-2">
+        <Loader2 size={16} class="animate-spin text-amber-400" />
+        <span>Loading access tokens...</span>
+      </div>
+    {:else if errorMsg}
+      <div class="p-4 text-xs rounded-2xl bg-red-500/10 text-red-300 border border-red-500/30">
+        {errorMsg}
+      </div>
+    {:else if tokens.length === 0}
+      <div class="p-8 text-center border border-dashed border-white/10 rounded-2xl space-y-2 bg-white/[0.01]">
+        <div class="text-xs font-bold text-white">No Personal Access Tokens Generated</div>
+        <p class="text-xs text-white/40 max-w-sm mx-auto">
+          Create an access token to connect Claude Desktop, Cursor, or your own agents to TxtGrph.
+        </p>
+      </div>
+    {:else}
+      <div class="overflow-x-auto border border-white/10 rounded-2xl bg-[#07080C]">
+        <table class="w-full text-left text-xs font-['IBM_Plex_Mono',monospace]">
+          <thead class="bg-white/[0.04] text-white/60 border-b border-white/10 font-bold">
+            <tr>
+              <th class="py-3 px-4">Label</th>
+              <th class="py-3 px-4">Prefix</th>
+              <th class="py-3 px-4">Created</th>
+              <th class="py-3 px-4">Last Used</th>
+              <th class="py-3 px-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            {#each tokens as token}
+              <tr class="hover:bg-white/[0.02] transition-colors">
+                <td class="py-3 px-4 font-bold text-white">{token.name}</td>
+                <td class="py-3 px-4 text-amber-400">{token.token_prefix}...</td>
+                <td class="py-3 px-4 text-white/50">{formatDate(token.created_at)}</td>
+                <td class="py-3 px-4 text-white/50">{formatDate(token.last_used_at)}</td>
+                <td class="py-3 px-4 text-right">
+                  <button
+                    onclick={() => handleRevokeToken(token.id, token.name)}
+                    class="text-xs text-red-400 hover:text-red-300 font-bold transition-colors cursor-pointer"
+                  >
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   </div>
 
-  {#if isLoading}
-    <div class="py-6 text-center text-xs text-[var(--color-text-muted)] font-mono animate-pulse">
-      Loading access tokens...
+  <!-- Interactive MCP Setup Guide Card -->
+  <div class="p-6 rounded-3xl bg-[#0F111A] border border-white/10 space-y-4">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <Server size={18} class="text-amber-400" />
+        <h4 class="text-xs font-bold text-white uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">MCP Agent Integration Snippets</h4>
+      </div>
+
+      <div class="flex items-center gap-1 p-1 rounded-xl bg-black/40 border border-white/10 font-['IBM_Plex_Mono',monospace]">
+        <button
+          onclick={() => (activeGuideTab = 'claude')}
+          class="px-3 py-1 text-[11px] font-bold rounded-lg transition-colors cursor-pointer {activeGuideTab === 'claude' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
+        >
+          Claude Desktop
+        </button>
+        <button
+          onclick={() => (activeGuideTab = 'cursor')}
+          class="px-3 py-1 text-[11px] font-bold rounded-lg transition-colors cursor-pointer {activeGuideTab === 'cursor' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
+        >
+          Cursor / VS Code
+        </button>
+      </div>
     </div>
-  {:else if errorMsg}
-    <div class="p-3 text-xs rounded bg-[var(--color-error-bg)] text-[var(--color-error-text)]">
-      {errorMsg}
+
+    <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3">
+      <div class="flex items-center justify-between text-xs text-white/60 font-['IBM_Plex_Mono',monospace]">
+        <span>Config File: {activeGuideTab === 'claude' ? 'claude_desktop_config.json' : 'mcp.json'}</span>
+        <button
+          onclick={copySnippet}
+          class="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+        >
+          {#if isSnippetCopied}
+            <Check size={13} class="text-emerald-400" />
+            <span class="text-emerald-400">Copied!</span>
+          {:else}
+            <Copy size={13} />
+            <span>Copy Snippet</span>
+          {/if}
+        </button>
+      </div>
+
+      <pre class="text-[12px] leading-[22px] font-['IBM_Plex_Mono',monospace] text-amber-300 whitespace-pre font-mono p-3.5 rounded-xl bg-black/60 border border-white/5 select-all overflow-x-auto">{activeGuideTab === 'claude' ? claudeSnippet : cursorSnippet}</pre>
     </div>
-  {:else if tokens.length === 0}
-    <div class="p-8 text-center border border-dashed border-[var(--color-border-default)] rounded-lg space-y-2">
-      <div class="text-sm font-medium text-[var(--color-text-secondary)]">No Personal Access Tokens Yet</div>
-      <p class="text-xs text-[var(--color-text-muted)] max-w-sm mx-auto">
-        Generate a token to allow Cursor, Claude Desktop, or your own scripts to interact with your diagram library.
-      </p>
-    </div>
-  {:else}
-    <div class="overflow-x-auto border border-[var(--color-border-default)] rounded-lg">
-      <table class="w-full text-left text-xs">
-        <thead class="bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)] font-medium border-b border-[var(--color-border-default)]">
-          <tr>
-            <th class="py-2.5 px-3">Token Label</th>
-            <th class="py-2.5 px-3 font-mono">Token Prefix</th>
-            <th class="py-2.5 px-3">Created</th>
-            <th class="py-2.5 px-3">Last Used</th>
-            <th class="py-2.5 px-3 text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-[var(--color-border-default)]">
-          {#each tokens as token}
-            <tr class="hover:bg-[var(--color-surface-subtle)]/50">
-              <td class="py-2.5 px-3 font-medium text-[var(--color-text-primary)]">{token.name}</td>
-              <td class="py-2.5 px-3 font-mono text-[var(--color-text-muted)]">{token.token_prefix}...</td>
-              <td class="py-2.5 px-3 text-[var(--color-text-secondary)]">{formatDate(token.created_at)}</td>
-              <td class="py-2.5 px-3 text-[var(--color-text-secondary)]">{formatDate(token.last_used_at)}</td>
-              <td class="py-2.5 px-3 text-right">
-                <button
-                  onclick={() => handleRevokeToken(token.id, token.name)}
-                  class="text-xs text-[var(--color-error-text)] hover:underline font-medium"
-                >
-                  Revoke
-                </button>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  {/if}
-</section>
+  </div>
+</div>
 
 <!-- Generate Token Modal -->
 {#if isCreateModalOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-    <div class="bg-[var(--color-surface-card)] border border-[var(--color-border-default)] rounded-xl max-w-md w-full p-6 space-y-4 shadow-xl">
-      <div class="flex items-center justify-between">
-        <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150">
+    <div class="bg-[#0C0E14] border border-white/15 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl font-['Instrument_Sans',sans-serif]">
+      <div class="flex items-center justify-between border-b border-white/10 pb-3">
+        <h3 class="text-sm font-bold text-white">
           {createdRawToken ? 'Access Token Generated' : 'Generate Personal Access Token'}
         </h3>
-        <button onclick={closeCreateModal} class="text-[var(--color-text-muted)] hover:text-black">
-          ✕
+        <button onclick={closeCreateModal} class="text-white/40 hover:text-white p-1 rounded-lg transition-colors cursor-pointer">
+          <X size={16} />
         </button>
       </div>
 
       {#if !createdRawToken}
-        <div class="space-y-3 text-sm">
+        <div class="space-y-4">
           <div>
-            <label for="token-name-input" class="block text-xs font-medium mb-1 text-[var(--color-text-secondary)]">
-              Token Description / Name
+            <label for="token-name-input" class="block text-xs font-bold mb-1.5 text-white">
+              Token Description / Label
             </label>
             <input
               id="token-name-input"
               type="text"
               bind:value={newTokenName}
               placeholder="e.g. Cursor MCP Token"
-              class="w-full px-3 py-2 text-sm rounded border border-[var(--color-border-default)] bg-[var(--color-surface-app)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brass)]"
+              class="w-full px-4 py-3 text-xs rounded-2xl border border-white/15 bg-[#07080C] text-white focus:outline-none focus:border-amber-400 font-['IBM_Plex_Mono',monospace]"
             />
           </div>
         </div>
 
-        <div class="flex items-center justify-end gap-2 pt-3 border-t border-[var(--color-border-default)]">
+        <div class="flex items-center justify-end gap-2 pt-3 border-t border-white/10">
           <button
             onclick={closeCreateModal}
-            class="px-4 py-2 text-xs rounded border border-[var(--color-border-strong)] hover:bg-[var(--color-surface-subtle)]"
+            class="px-4 py-2 text-xs font-bold rounded-xl border border-white/15 hover:bg-white/10 text-white/70 transition-colors cursor-pointer"
           >
             Cancel
           </button>
           <button
             onclick={handleCreateToken}
             disabled={isCreating || !newTokenName.trim()}
-            class="px-4 py-2 text-xs rounded bg-[var(--color-brass)] text-white font-medium hover:opacity-90 disabled:opacity-50"
+            class="px-5 py-2 text-xs rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold transition-colors shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
           >
-            {isCreating ? 'Generating...' : 'Generate Token'}
+            {#if isCreating}
+              <Loader2 size={14} class="animate-spin" />
+              <span>Generating...</span>
+            {:else}
+              <KeyRound size={14} />
+              <span>Generate Token</span>
+            {/if}
           </button>
         </div>
       {:else}
-        <div class="space-y-4 text-xs">
-          <div class="p-3 rounded bg-[var(--color-warning-bg)] text-[var(--color-warning-text)] space-y-1">
-            <div class="font-semibold">⚠️ Copy this token now</div>
-            <p>You won't be able to view or copy this access token again after closing this modal!</p>
+        <div class="space-y-4">
+          <div class="p-4 rounded-2xl bg-amber-500/10 text-amber-300 border border-amber-500/30 text-xs space-y-1">
+            <div class="font-bold flex items-center gap-1.5 text-amber-400">⚠️ Copy this token now</div>
+            <p class="leading-relaxed">This secret raw token won't be shown again after closing this window.</p>
           </div>
 
           <div>
-            <label for="token-raw-output" class="block text-xs font-medium mb-1 text-[var(--color-text-secondary)]">Your Raw Access Token</label>
+            <label for="token-raw-output" class="block text-xs font-bold mb-1.5 text-white">Your Secret Access Token</label>
             <div class="flex items-center gap-2">
               <input
                 id="token-raw-output"
                 type="text"
                 readonly
                 value={createdRawToken}
-                class="w-full px-3 py-2 font-mono text-xs rounded border border-[var(--color-border-default)] bg-[var(--color-surface-app)] text-[var(--color-text-primary)] select-all"
+                class="w-full px-4 py-3 font-mono text-xs rounded-2xl border border-white/15 bg-[#07080C] text-emerald-400 select-all"
               />
               <button
                 onclick={copyTokenToClipboard}
-                class="px-3 py-2 rounded bg-[var(--color-ink)] text-white font-medium shrink-0 hover:opacity-90"
+                class="px-4 py-3 rounded-2xl bg-white text-black font-bold text-xs shrink-0 hover:bg-slate-200 transition-colors cursor-pointer flex items-center gap-1.5"
               >
-                {isCopied ? 'Copied!' : 'Copy'}
+                {#if isCopied}
+                  <Check size={14} class="text-emerald-600" />
+                  <span>Copied!</span>
+                {:else}
+                  <Copy size={14} />
+                  <span>Copy</span>
+                {/if}
               </button>
             </div>
           </div>
         </div>
 
-        <div class="flex items-center justify-end pt-3 border-t border-[var(--color-border-default)]">
+        <div class="flex items-center justify-end pt-3 border-t border-white/10">
           <button
             onclick={closeCreateModal}
-            class="px-4 py-2 text-xs rounded bg-[var(--color-brass)] text-white font-medium hover:opacity-90"
+            class="px-6 py-2 text-xs font-bold rounded-xl bg-amber-400 hover:bg-amber-300 text-black transition-colors cursor-pointer"
           >
             Done
           </button>

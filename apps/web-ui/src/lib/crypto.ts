@@ -22,7 +22,7 @@ async function deriveKey(userId: string): Promise<CryptoKey> {
       hash: 'SHA-256',
     },
     masterMaterial,
-    { name: 'AES-256-GCM', length: 256 },
+    { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt', 'decrypt']
   );
@@ -37,7 +37,7 @@ export async function encryptApiKey(apiKey: string, userId: string): Promise<str
   const encodedData = new TextEncoder().encode(apiKey);
 
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-256-GCM', iv },
+    { name: 'AES-GCM', iv },
     key,
     encodedData
   );
@@ -64,7 +64,7 @@ export async function decryptApiKey(encryptedPayload: string, userId: string): P
   const ciphertext = combined.slice(12);
 
   const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-256-GCM', iv },
+    { name: 'AES-GCM', iv },
     key,
     ciphertext
   );

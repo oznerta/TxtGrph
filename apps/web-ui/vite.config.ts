@@ -36,4 +36,7 @@ export default defineConfig({
     },
   },
   plugins: [copyBrandAssetsPlugin(), tailwindcss(), sveltekit()],
+  test: {
+    exclude: ['e2e/**', 'node_modules/**'],
+  },
 });

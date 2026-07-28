@@ -11,7 +11,8 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.6",
@@ -26,6 +27,7 @@
     "@txtgrph/ai-router": "workspace:*",
     "@txtgrph/config": "workspace:*",
     "@txtgrph/core": "workspace:*",
+    "@txtgrph/mcp-server": "workspace:*",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.1",
     "lucide-svelte": "^0.475.0",

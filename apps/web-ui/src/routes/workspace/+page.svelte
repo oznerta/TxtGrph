@@ -2,8 +2,12 @@
   import { onMount } from 'svelte';
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { workspaceStore } from '$lib/stores/workspaceStore.svelte';
-  import CodeMirrorEditor from '$lib/components/editor/CodeMirrorEditor.svelte';
+  import { presenceStore } from '$lib/stores/presenceStore.svelte';
   import FolderTree from '$lib/components/workspace/FolderTree.svelte';
+  import FavoriteIcon from '$lib/components/ui/FavoriteIcon.svelte';
+  import DiagramCanvas from '$lib/components/workspace/DiagramCanvas.svelte';
+  import VersionHistoryModal from '$lib/components/workspace/VersionHistoryModal.svelte';
+  import CommentsModal from '$lib/components/workspace/CommentsModal.svelte';
   import {
     Plus,
     LogOut,
@@ -16,14 +20,49 @@
     ZoomIn,
     ZoomOut,
     Maximize2,
+    Minimize2,
     Sparkles,
     Settings,
     Share2,
-    Trash2
+    Trash2,
+    Code,
+    Hand,
+    Palette,
+    RefreshCw,
+    X,
+    ChevronDown,
+    ArrowDown,
+    ArrowUp,
+    ArrowRight,
+    ArrowLeft,
+    Network,
+    GitFork,
+    Check,
+    Sun,
+    Moon,
+    MousePointer,
+    FolderKanban,
+    BookOpen,
+    FolderPlus,
+    Copy,
+    MoreVertical,
+    Heart,
+    Pencil,
+    FolderOutput,
+    History,
+    MessageSquare
   } from 'lucide-svelte';
   import AIAssistantModal from '$lib/components/workspace/AIAssistantModal.svelte';
   import ShareModal from '$lib/components/workspace/ShareModal.svelte';
   import TrashBinModal from '$lib/components/workspace/TrashBinModal.svelte';
+  import DashboardGallery from '$lib/components/workspace/DashboardGallery.svelte';
+  import SettingsModal from '$lib/components/workspace/SettingsModal.svelte';
+  import CreateOrgModal from '$lib/components/workspace/CreateOrgModal.svelte';
+  import AdvancedExportModal from '$lib/components/workspace/AdvancedExportModal.svelte';
+  import TemplatesModal from '$lib/components/workspace/TemplatesModal.svelte';
+  import OrgSettingsModal from '$lib/components/workspace/OrgSettingsModal.svelte';
+  import MultiMoveModal from '$lib/components/workspace/MultiMoveModal.svelte';
+  import type { Diagram } from '$lib/stores/workspaceStore.svelte';
   import { goto } from '$app/navigation';
   import mermaid from 'mermaid';
 
@@ -36,113 +75,731 @@
 
   let shareModalOpen = $state(false);
   let trashModalOpen = $state(false);
+  let settingsModalOpen = $state(false);
+  let aiModalOpen = $state(false);
+  let createOrgModalOpen = $state(false);
+  let advancedExportModalOpen = $state(false);
+  let templatesModalOpen = $state(false);
+  let orgSettingsModalOpen = $state(false);
+  let versionHistoryModalOpen = $state(false);
+  let commentsModalOpen = $state(false);
+  let multiMoveModalOpen = $state(false);
+  let multiMoveModalIds = $state<string[]>([]);
+  let activeOrgSettingsId = $state<string | null>(null);
+  let activeOrgSettingsName = $state('Team Space');
+  let organizations = $state<{ id: string; name: string }[]>([]);
 
-  // Live Mermaid Render State
-  let mermaidContainer: HTMLDivElement;
+  $effect(() => {
+    loadOrganizations();
+  });
+
+  async function loadOrganizations() {
+    try {
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('id, name')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      if (data) {
+        organizations = data.map((o: any) => ({ id: o.id, name: o.name }));
+      }
+    } catch (err) {
+      console.error('Failed to load organizations:', err);
+    }
+  }
+
+  async function handleCreateOrg(name: string) {
+    if (!name.trim()) return;
+    try {
+      const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.random().toString(36).substring(2, 6);
+      const { data, error } = await supabase
+        .from('organizations')
+        .insert({
+          name: name.trim(),
+          slug
+        })
+        .select('id, name')
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        organizations = [...organizations, { id: data.id, name: data.name }];
+      }
+      createOrgModalOpen = false;
+    } catch (err) {
+      console.error('Failed to create organization:', err);
+    }
+  }
+
+  let favoriteIds = $state<Set<string>>(new Set());
+
+  // Canvas Actions Menu State (Matching Homepage)
+  let actionsMenuOpen = $state(false);
+  let copySvgSuccess = $state(false);
+  let copiedError = $state(false);
+
+  // Header 3-dot menu state
+  let headerMenuOpen = $state(false);
+
+  $effect(() => {
+    if (workspaceStore.activeDiagram && data.session?.user) {
+      const user = data.session.user;
+      const userMeta = user.user_metadata || {};
+      const fullName = userMeta.full_name || userMeta.name || userMeta.display_name || user.email?.split('@')[0];
+
+      presenceStore.joinDiagram(workspaceStore.activeDiagram.id, {
+        id: user.id,
+        email: user.email || '',
+        fullName: fullName,
+        avatarUrl: userMeta.avatar_url,
+        role: 'owner'
+      });
+    } else {
+      presenceStore.leaveDiagram();
+    }
+  });
+
+  // Breadcrumb: resolve folder name for active diagram
+  let activeFolderName = $derived.by(() => {
+    const diagram = workspaceStore.activeDiagram;
+    if (!diagram || !diagram.folderId) return null;
+    const folder = workspaceStore.folders.find((f) => f.id === diagram.folderId && !f.isDeleted);
+    return folder?.name || null;
+  });
+
+  // ── Canvas Editor Floating UI States (Matching Homepage Playground) ──
+  let editorCollapsed = $state(false);
+  let activeInteractionMode = $state<'select' | 'pan'>('select');
+  let isAutoLayoutEnabled = $state(true);
+  let activeToolbarPopover = $state<'none' | 'theme' | 'direction' | 'layout'>('none');
+
+  // Mermaid Theme & Canvas Styling (Exact match from homepage)
+  let selectedMermaidTheme = $state<'dark' | 'forest' | 'neutral' | 'base' | 'default' | 'ocean' | 'rose' | 'monochrome'>('dark');
+  let canvasMode = $state<'dark' | 'light'>('dark');
+  let canvasPattern = $state<'dots' | 'grid' | 'crosses' | 'solid'>('dots');
+  let currentDirection = $state<'TD' | 'BT' | 'LR' | 'RL'>('TD');
+  let currentLayoutAlgorithm = $state<'hierarchical' | 'adaptive'>('hierarchical');
+  let selectedFontFamily = $state('Instrument Sans, sans-serif');
+
+  // Interactive Pan & Zoom Canvas State (Exact match from homepage)
+  let zoomScale = $state(1.0);
+  let panX = $state(0);
+  let panY = $state(0);
+  let isPanning = $state(false);
+  let startPanX = $state(0);
+  let startPanY = $state(0);
+  let isCanvasFullscreen = $state(false);
+
+  // Mermaid Live Render State
+  let svgContent = $state('');
   let renderError = $state<string | null>(null);
   let isRendering = $state(false);
-  let svgContent = $state('');
-  let zoomLevel = $state(1);
-
-  // Debounce timers
-  let renderTimeout: ReturnType<typeof setTimeout>;
-  let saveTimeout: ReturnType<typeof setTimeout>;
 
   onMount(() => {
+    try {
+      mermaid.parseError = () => {};
+    } catch (e) {
+      console.error('Mermaid parseError handler init error:', e);
+    }
+
     mermaid.initialize({
       startOnLoad: false,
       theme: 'dark',
       securityLevel: 'loose',
-      fontFamily: 'Instrument Sans, sans-serif'
+      fontFamily: selectedFontFamily
     });
 
-    workspaceStore.init(data.folders || [], data.diagrams || []);
-    if (workspaceStore.activeDiagram) {
-      activeTitleInput = workspaceStore.activeTitle;
-      triggerRender(workspaceStore.activeCode);
+    const handleFullscreenChange = () => {
+      isCanvasFullscreen = !!document.fullscreenElement;
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    if (data.diagrams && data.diagrams.length > 0) {
+      workspaceStore.diagrams = data.diagrams;
     }
+    if (data.folders && data.folders.length > 0) {
+      workspaceStore.folders = data.folders;
+    }
+
+    if (workspaceStore.diagrams.length > 0) {
+      favoriteIds = new Set(workspaceStore.diagrams.filter((d) => d.isShared).map((d) => d.id));
+    }
+
+    const handleGlobalKeydown = (e: KeyboardEvent) => {
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+      if (isCmdOrCtrl && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          shareModalOpen = true;
+        } else {
+          performManualSave();
+        }
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          advancedExportModalOpen = true;
+        } else {
+          editorCollapsed = !editorCollapsed;
+        }
+      } else if (isCmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        templatesModalOpen = true;
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeydown);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      window.removeEventListener('keydown', handleGlobalKeydown);
+    };
   });
 
-  // Re-trigger diagram render when active diagram changes
   $effect(() => {
-    if (workspaceStore.activeDiagramId && workspaceStore.activeCode !== undefined) {
-      activeTitleInput = workspaceStore.activeTitle;
-      triggerRender(workspaceStore.activeCode);
+    const code = workspaceStore.activeCode;
+    if (code) {
+      renderDiagram(code);
     }
   });
 
-  let aiModalOpen = $state(false);
+  async function renderDiagram(code: string) {
+    if (!code || !code.trim()) {
+      svgContent = '';
+      renderError = null;
+      return;
+    }
 
-  function triggerRender(code: string) {
-    clearTimeout(renderTimeout);
-    renderTimeout = setTimeout(async () => {
-      if (!code.trim()) {
-        svgContent = '';
-        renderError = null;
-        return;
-      }
+    isRendering = true;
+    renderError = null;
+    const renderId = `mermaid-render-${Math.random().toString(36).substring(2, 9)}`;
 
-      isRendering = true;
-      try {
-        const id = `mermaid-svg-${Date.now()}`;
-        const { svg } = await mermaid.render(id, code);
-        svgContent = svg;
-        renderError = null;
-      } catch (err: any) {
-        renderError = err?.message || 'Mermaid Syntax Error';
-      } finally {
-        isRendering = false;
+    try {
+      const isValid = await mermaid.parse(code, { suppressErrors: true });
+      if (!isValid) {
+        throw new Error('Syntax error in text');
       }
-    }, 300);
+      const { svg } = await mermaid.render(renderId, code);
+      svgContent = svg;
+      renderError = null;
+    } catch (err: any) {
+      renderError = err?.message || 'Syntax error in Mermaid diagram';
+    } finally {
+      isRendering = false;
+      const errEl = document.getElementById(renderId) || document.getElementById('d' + renderId);
+      if (errEl) errEl.remove();
+      document.querySelectorAll('svg[id^="dmermaid-render-"], svg[id^="mermaid-render-"]').forEach((el) => el.remove());
+      document.querySelectorAll('svg[id*="mermaid"], .error-icon').forEach((el) => {
+        if (el.parentNode === document.body) el.remove();
+      });
+    }
   }
 
-  function handleCodeChange(newCode: string) {
-    if (!workspaceStore.activeDiagram) return;
+  // ── Theme System (Exact replication from homepage playground) ──
+  function toggleCanvasMode(mode: 'dark' | 'light') {
+    canvasMode = mode;
+    changeMermaidTheme(selectedMermaidTheme);
+  }
 
-    workspaceStore.activeDiagram.code = newCode;
-    workspaceStore.saveStatus = 'saving';
-    triggerRender(newCode);
+  function changeMermaidTheme(newTheme: typeof selectedMermaidTheme) {
+    selectedMermaidTheme = newTheme;
+    const isLight = canvasMode === 'light';
 
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-      if (!workspaceStore.activeDiagramId) return;
-      const { error } = await supabase
-        .from('diagrams')
-        .update({ code: newCode, updated_at: new Date().toISOString() })
-        .eq('id', workspaceStore.activeDiagramId);
+    let resolvedTheme: string = newTheme;
+    let resolvedThemeVars: Record<string, string> = {
+      fontFamily: selectedFontFamily,
+    };
 
-      if (error) {
-        console.error('Auto-save error:', error);
-        workspaceStore.saveStatus = 'error';
+    if (newTheme === 'dark') {
+      resolvedTheme = 'dark';
+      resolvedThemeVars = isLight
+        ? { fontFamily: selectedFontFamily, lineColor: '#1E293B', defaultLinkColor: '#1E293B' }
+        : { fontFamily: selectedFontFamily, lineColor: '#CBD5E1', defaultLinkColor: '#CBD5E1', actorLineColor: '#CBD5E1', signalColor: '#CBD5E1' };
+    } else if (newTheme === 'default') {
+      resolvedTheme = 'default';
+      resolvedThemeVars = isLight
+        ? { fontFamily: selectedFontFamily, lineColor: '#1E293B', defaultLinkColor: '#1E293B' }
+        : { fontFamily: selectedFontFamily, lineColor: '#CBD5E1', defaultLinkColor: '#CBD5E1', actorLineColor: '#CBD5E1', signalColor: '#CBD5E1' };
+    } else if (newTheme === 'forest') {
+      resolvedTheme = 'forest';
+      resolvedThemeVars = isLight
+        ? { fontFamily: selectedFontFamily, lineColor: '#0F172A', defaultLinkColor: '#0F172A' }
+        : { fontFamily: selectedFontFamily, lineColor: '#6EE7B7', defaultLinkColor: '#6EE7B7', actorLineColor: '#6EE7B7', signalColor: '#6EE7B7' };
+    } else if (newTheme === 'neutral') {
+      resolvedTheme = 'neutral';
+      resolvedThemeVars = isLight
+        ? { fontFamily: selectedFontFamily, lineColor: '#0F172A', defaultLinkColor: '#0F172A' }
+        : { fontFamily: selectedFontFamily, lineColor: '#C084FC', defaultLinkColor: '#C084FC', actorLineColor: '#C084FC', signalColor: '#C084FC' };
+    } else if (newTheme === 'base') {
+      resolvedTheme = 'base';
+      resolvedThemeVars = isLight
+        ? {
+            fontFamily: selectedFontFamily,
+            primaryColor: '#F1F5F9',
+            primaryTextColor: '#0F172A',
+            primaryBorderColor: '#64748B',
+            lineColor: '#1E293B',
+            secondaryColor: '#E2E8F0',
+            tertiaryColor: '#FFFFFF',
+            edgeLabelBackground: '#FFFFFF',
+            nodeBorder: '#475569',
+          }
+        : {
+            fontFamily: selectedFontFamily,
+            primaryColor: '#1E293B',
+            primaryTextColor: '#F8FAFC',
+            primaryBorderColor: '#64748B',
+            lineColor: '#38BDF8',
+            secondaryColor: '#334155',
+            tertiaryColor: '#0F172A',
+            edgeLabelBackground: '#0F172A',
+            nodeBorder: '#64748B',
+          };
+    } else if (newTheme === 'ocean') {
+      resolvedTheme = 'base';
+      resolvedThemeVars = isLight
+        ? {
+            fontFamily: selectedFontFamily,
+            primaryColor: '#E0F2FE',
+            primaryTextColor: '#0369A1',
+            primaryBorderColor: '#0284C7',
+            lineColor: '#0284C7',
+            secondaryColor: '#BAE6FD',
+            tertiaryColor: '#F0F9FF',
+            edgeLabelBackground: '#FFFFFF',
+            nodeBorder: '#0284C7',
+          }
+        : {
+            fontFamily: selectedFontFamily,
+            primaryColor: '#0A192F',
+            primaryTextColor: '#E0F2FE',
+            primaryBorderColor: '#38BDF8',
+            lineColor: '#38BDF8',
+            secondaryColor: '#1E293B',
+            tertiaryColor: '#0284C7',
+            edgeLabelBackground: '#0A192F',
+            nodeBorder: '#38BDF8',
+          };
+    } else if (newTheme === 'rose') {
+      resolvedTheme = 'base';
+      resolvedThemeVars = isLight
+        ? {
+            fontFamily: selectedFontFamily,
+            primaryColor: '#FFE4E6',
+            primaryTextColor: '#9F1239',
+            primaryBorderColor: '#E11D48',
+            lineColor: '#E11D48',
+            secondaryColor: '#FECDD3',
+            tertiaryColor: '#FFF1F2',
+            edgeLabelBackground: '#FFFFFF',
+            nodeBorder: '#E11D48',
+          }
+        : {
+            fontFamily: selectedFontFamily,
+            primaryColor: '#2A0815',
+            primaryTextColor: '#FFE4E6',
+            primaryBorderColor: '#FB7185',
+            lineColor: '#FB7185',
+            secondaryColor: '#4C1D2F',
+            tertiaryColor: '#881337',
+            edgeLabelBackground: '#2A0815',
+            nodeBorder: '#FB7185',
+          };
+    } else if (newTheme === 'monochrome') {
+      resolvedTheme = 'base';
+      resolvedThemeVars = isLight
+        ? {
+            fontFamily: selectedFontFamily,
+            primaryColor: '#F8FAFC',
+            primaryTextColor: '#000000',
+            primaryBorderColor: '#000000',
+            lineColor: '#000000',
+            secondaryColor: '#E2E8F0',
+            tertiaryColor: '#FFFFFF',
+            edgeLabelBackground: '#FFFFFF',
+            nodeBorder: '#000000',
+          }
+        : {
+            fontFamily: selectedFontFamily,
+            primaryColor: '#000000',
+            primaryTextColor: '#FFFFFF',
+            primaryBorderColor: '#FFFFFF',
+            lineColor: '#FFFFFF',
+            secondaryColor: '#18181B',
+            tertiaryColor: '#27272A',
+            edgeLabelBackground: '#000000',
+            nodeBorder: '#FFFFFF',
+          };
+    }
+
+    try {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: resolvedTheme as any,
+        fontFamily: selectedFontFamily,
+        securityLevel: 'loose',
+        themeVariables: resolvedThemeVars,
+      });
+      const code = workspaceStore.activeCode;
+      if (code) renderDiagram(code);
+    } catch (e) {
+      console.error('Theme change error', e);
+    }
+  }
+
+  function toggleToolbarPopover(popover: 'theme' | 'direction' | 'layout') {
+    if (activeToolbarPopover === popover) {
+      activeToolbarPopover = 'none';
+    } else {
+      activeToolbarPopover = popover;
+    }
+  }
+
+  function setDirection(dir: 'TD' | 'BT' | 'LR' | 'RL') {
+    currentDirection = dir;
+    let code = workspaceStore.activeCode;
+    if (code.match(/graph (TD|TB|BT|LR|RL)/)) {
+      code = code.replace(/graph (TD|TB|BT|LR|RL)/, `graph ${dir}`);
+    } else if (code.match(/flowchart (TD|TB|BT|LR|RL)/)) {
+      code = code.replace(/flowchart (TD|TB|BT|LR|RL)/, `flowchart ${dir}`);
+    }
+    workspaceStore.updateActiveCode(code);
+    activeToolbarPopover = 'none';
+  }
+
+  function setLayoutAlgorithm(algo: 'hierarchical' | 'adaptive') {
+    currentLayoutAlgorithm = algo;
+    const renderer = algo === 'adaptive' ? 'elk' : 'dagre-wrapper';
+    try {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: selectedMermaidTheme as any,
+        fontFamily: selectedFontFamily,
+        securityLevel: 'loose',
+        flowchart: {
+          defaultRenderer: renderer,
+        },
+      });
+    } catch (e) {
+      console.error('Mermaid layout init error', e);
+    }
+
+    let code = workspaceStore.activeCode;
+    if (code.includes('graph ') || code.includes('flowchart ')) {
+      let cleanCode = code.replace(/%%\{init:\s*\{\s*["']flowchart["']:\s*\{\s*["']defaultRenderer["']:\s*["'](elk|dagre)["']\s*\}\s*\}\s*\}%%\n?/gi, '');
+      code = `%%{init: {"flowchart": {"defaultRenderer": "${renderer}"}}}%%\n` + cleanCode.trimStart();
+    }
+
+    workspaceStore.updateActiveCode(code);
+    activeToolbarPopover = 'none';
+  }
+
+  function setDiagramFont(fontName: string) {
+    selectedFontFamily = fontName;
+    changeMermaidTheme(selectedMermaidTheme);
+    activeToolbarPopover = 'none';
+  }
+
+  function toggleAutoLayout() {
+    isAutoLayoutEnabled = !isAutoLayoutEnabled;
+    let code = workspaceStore.activeCode;
+    if (isAutoLayoutEnabled) {
+      if (code.match(/graph (LR|RL|BT)/)) {
+        code = code.replace(/graph (LR|RL|BT)/, 'graph TD');
+        currentDirection = 'TD';
+      }
+    } else {
+      if (code.match(/graph (TD|TB)/)) {
+        code = code.replace(/graph (TD|TB)/, 'graph LR');
+        currentDirection = 'LR';
+      }
+    }
+    workspaceStore.updateActiveCode(code);
+  }
+
+  // ── Interactive Pan & Zoom (Exact replication from homepage playground) ──
+  function zoomIn() {
+    zoomScale = Math.min(3.5, Math.round((zoomScale + 0.15) * 100) / 100);
+  }
+
+  function zoomOut() {
+    zoomScale = Math.max(0.3, Math.round((zoomScale - 0.15) * 100) / 100);
+  }
+
+  function resetZoom() {
+    zoomScale = 1.0;
+    panX = 0;
+    panY = 0;
+  }
+
+  function startPan(e: MouseEvent) {
+    if ((activeInteractionMode === 'pan' && e.button === 0) || e.button === 2) {
+      if (e.button === 2) {
+        e.preventDefault();
+      }
+      isPanning = true;
+      startPanX = e.clientX - panX;
+      startPanY = e.clientY - panY;
+    }
+  }
+
+  function onPanMove(e: MouseEvent) {
+    if (isPanning) {
+      panX = e.clientX - startPanX;
+      panY = e.clientY - startPanY;
+    }
+  }
+
+  function endPan() {
+    isPanning = false;
+  }
+
+  function handleCanvasWheel(e: WheelEvent) {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+      zoomScale = Math.min(3.5, Math.max(0.3, Math.round(zoomScale * zoomFactor * 100) / 100));
+    } else if (activeInteractionMode === 'pan') {
+      panX -= e.deltaX;
+      panY -= e.deltaY;
+    }
+  }
+
+  function toggleCanvasFullscreen() {
+    if (typeof document !== 'undefined') {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().then(() => {
+          isCanvasFullscreen = true;
+        }).catch(() => {
+          isCanvasFullscreen = true;
+        });
       } else {
-        workspaceStore.saveStatus = 'saved';
+        document.exitFullscreen().then(() => {
+          isCanvasFullscreen = false;
+        }).catch(() => {
+          isCanvasFullscreen = false;
+        });
       }
-    }, 800);
+    }
   }
 
-  async function handleTitleSave() {
+  // ── Canvas Background Style (Exact replication from homepage playground) ──
+  let canvasBgStyle = $derived.by(() => {
+    if (canvasMode === 'dark') {
+      if (canvasPattern === 'dots') return 'background-color: #0B0C10; background-image: radial-gradient(rgba(255, 255, 255, 0.22) 1.2px, transparent 1.2px); background-size: 20px 20px;';
+      if (canvasPattern === 'grid') return 'background-color: #0B0C10; background-image: linear-gradient(to right, rgba(255, 255, 255, 0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.08) 1px, transparent 1px); background-size: 24px 24px;';
+      if (canvasPattern === 'crosses') return 'background-color: #0B0C10; background-image: radial-gradient(rgba(255, 255, 255, 0.3) 1.5px, transparent 1.5px); background-size: 28px 28px;';
+      return 'background-color: #0B0C10;';
+    } else {
+      if (canvasPattern === 'dots') return 'background-color: #F8FAFC; background-image: radial-gradient(rgba(0, 0, 0, 0.25) 1.2px, transparent 1.2px); background-size: 20px 20px;';
+      if (canvasPattern === 'grid') return 'background-color: #F8FAFC; background-image: linear-gradient(to right, rgba(0, 0, 0, 0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(0, 0, 0, 0.08) 1px, transparent 1px); background-size: 24px 24px;';
+      if (canvasPattern === 'crosses') return 'background-color: #F8FAFC; background-image: radial-gradient(rgba(0, 0, 0, 0.35) 1.5px, transparent 1.5px); background-size: 28px 28px;';
+      return 'background-color: #F8FAFC;';
+    }
+  });
+
+  let autoSaveEnabled = $state(true);
+  let showSaveToast = $state(false);
+  let toastTimer: any = null;
+
+  let localSaveTimer: any = null;
+  function recordLocalEdit(diagramId: string, code: string) {
+    if (typeof window === 'undefined' || !diagramId || !code) return;
+    clearTimeout(localSaveTimer);
+    localSaveTimer = setTimeout(() => {
+      try {
+        const key = `txtgrph_local_edits_${diagramId}`;
+        const stored = localStorage.getItem(key);
+        let list: any[] = stored ? JSON.parse(stored) : [];
+
+        const newCheckpoint = {
+          id: `edit-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          code,
+          charCount: code.length,
+          summary: `Local Edit (${code.length} chars)`
+        };
+
+        if (list.length === 0 || list[0].code !== code) {
+          list = [newCheckpoint, ...list].slice(0, 25);
+          localStorage.setItem(key, JSON.stringify(list));
+        }
+      } catch (e) {
+        console.warn('Failed to record local edit:', e);
+      }
+    }, 1500);
+  }
+
+  // ── Code Change & Save Handlers ──
+  function handleCodeChange(newCode: string) {
+    workspaceStore.updateActiveCode(newCode);
+    if (workspaceStore.activeDiagramId) {
+      recordLocalEdit(workspaceStore.activeDiagramId, newCode);
+      if (autoSaveEnabled && data.session?.user?.id) {
+        saveDiagramDebounced(workspaceStore.activeDiagramId, newCode);
+      } else {
+        workspaceStore.saveStatus = 'unsaved';
+      }
+    }
+  }
+
+  let saveTimer: any = null;
+  function saveDiagramDebounced(diagramId: string, code: string) {
+    workspaceStore.saveStatus = 'saving';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      await supabase
+        .from('diagrams')
+        .update({ code, updated_at: new Date().toISOString() })
+        .eq('id', diagramId);
+      workspaceStore.saveStatus = 'saved';
+    }, 1000);
+  }
+
+  async function performManualSave() {
+    if (!workspaceStore.activeDiagramId || !data.session?.user?.id) return;
+    workspaceStore.saveStatus = 'saving';
+    try {
+      await supabase
+        .from('diagrams')
+        .update({ code: workspaceStore.activeCode, updated_at: new Date().toISOString() })
+        .eq('id', workspaceStore.activeDiagramId);
+      workspaceStore.saveStatus = 'saved';
+
+      showSaveToast = true;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => (showSaveToast = false), 2500);
+    } catch (err) {
+      console.error('Failed manual save:', err);
+      workspaceStore.saveStatus = 'error';
+    }
+  }
+
+  function handleTitleSave() {
     isEditingTitle = false;
-    if (!workspaceStore.activeDiagram || !activeTitleInput.trim()) return;
+    if (activeTitleInput.trim() && workspaceStore.activeDiagramId) {
+      workspaceStore.updateActiveTitle(activeTitleInput.trim());
+      supabase
+        .from('diagrams')
+        .update({ title: activeTitleInput.trim(), updated_at: new Date().toISOString() })
+        .eq('id', workspaceStore.activeDiagramId);
+    }
+  }
 
-    const newTitle = activeTitleInput.trim();
-    workspaceStore.activeDiagram.title = newTitle;
+  // ── Code Editor Line Numbers (Exact homepage textarea approach) ──
+  let lineNumbers = $derived(
+    Array.from({ length: Math.max(1, workspaceStore.activeCode.split('\n').length) }, (_, i) => i + 1)
+  );
 
-    await supabase
-      .from('diagrams')
-      .update({ title: newTitle })
-      .eq('id', workspaceStore.activeDiagramId);
+  function handleCodeInput(e: Event) {
+    const target = e.target as HTMLTextAreaElement;
+    handleCodeChange(target.value);
+  }
+
+  // ── Export Functions (Exact homepage approach) ──
+  function handleExport(format: 'svg' | 'png' | 'jpeg' | 'mmd' | 'md' | 'copy-svg') {
+    const baseFilename = (workspaceStore.activeTitle || 'diagram').replace(/\s+/g, '-');
+
+    if (format === 'svg') {
+      const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+      downloadBlob(blob, `${baseFilename}.svg`);
+    } else if (format === 'mmd') {
+      const blob = new Blob([workspaceStore.activeCode], { type: 'text/plain' });
+      downloadBlob(blob, `${baseFilename}.mmd`);
+    } else if (format === 'md') {
+      const mdContent = `# ${workspaceStore.activeTitle}\n\n\`\`\`mermaid\n${workspaceStore.activeCode}\n\`\`\`\n`;
+      const blob = new Blob([mdContent], { type: 'text/markdown' });
+      downloadBlob(blob, `${baseFilename}.md`);
+    } else if (format === 'copy-svg') {
+      navigator.clipboard.writeText(svgContent);
+      copySvgSuccess = true;
+      setTimeout(() => (copySvgSuccess = false), 2000);
+    } else if (format === 'png' || format === 'jpeg') {
+      rasterizeSvgToImage(svgContent, format, `${baseFilename}.${format === 'jpeg' ? 'jpg' : 'png'}`);
+    }
+
+    actionsMenuOpen = false;
+  }
+
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function rasterizeSvgToImage(svgString: string, format: 'png' | 'jpeg', filename: string) {
+    const img = new window.Image();
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const scale = 2;
+      canvas.width = (img.width || 1200) * scale;
+      canvas.height = (img.height || 900) * scale;
+
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        if (format === 'jpeg') {
+          ctx.fillStyle = '#0E0F12';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) downloadBlob(blob, filename);
+        }, format === 'jpeg' ? 'image/jpeg' : 'image/png', 0.95);
+      }
+      URL.revokeObjectURL(url);
+    };
+
+    img.src = url;
+  }
+
+  async function copyErrorToClipboard() {
+    if (!renderError) return;
+    try {
+      await navigator.clipboard.writeText(renderError);
+      copiedError = true;
+      setTimeout(() => (copiedError = false), 2000);
+    } catch (err) {
+      console.error('Copy error failed', err);
+    }
+  }
+
+  function toggleFavorite(diagramId: string) {
+    const next = new Set(favoriteIds);
+    if (next.has(diagramId)) {
+      next.delete(diagramId);
+    } else {
+      next.add(diagramId);
+    }
+    favoriteIds = next;
+  }
+
+  function downloadSvg() {
+    if (!svgContent) return;
+    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${workspaceStore.activeTitle || 'diagram'}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function handleCreateDiagram(title = 'Untitled Diagram', folderId: string | null = null) {
     if (!data.session?.user?.id) return;
 
+    const initialCode = `graph TD\n  Start[Start Process] --> Process[Execute Task]\n  Process --> End[Finish]`;
     const { data: created, error } = await supabase
       .from('diagrams')
       .insert({
         title,
         folder_id: folderId,
         user_id: data.session.user.id,
-        code: `flowchart TD\n    A[Start] --> B[Process]\n    B --> C[End]`
+        code: initialCode
       })
       .select()
       .single();
@@ -165,7 +822,8 @@
       };
 
       workspaceStore.diagrams = [newDiagram, ...workspaceStore.diagrams];
-      workspaceStore.selectDiagram(created.id);
+      workspaceStore.selectDiagram(newDiagram.id);
+      sidebarOpen = false;
     }
   }
 
@@ -188,6 +846,8 @@
         userId: created.user_id,
         parentId: created.parent_id,
         name: created.name,
+        color: created.color || null,
+        icon: created.icon || null,
         isDeleted: created.is_deleted || false,
         deletedAt: created.deleted_at || null,
         createdAt: created.created_at,
@@ -214,258 +874,167 @@
       .eq('id', id);
   }
 
+  async function handleDuplicateDiagrams(ids: string[]) {
+    if (!data.session?.user?.id) return;
+
+    for (const id of ids) {
+      const source = workspaceStore.diagrams.find((d) => d.id === id);
+      if (!source) continue;
+
+      const { data: created, error } = await supabase
+        .from('diagrams')
+        .insert({
+          title: `${source.title} (Copy)`,
+          folder_id: source.folderId,
+          user_id: data.session.user.id,
+          code: source.code
+        })
+        .select()
+        .single();
+
+      if (created && !error) {
+        const newDiagram = {
+          id: created.id,
+          userId: created.user_id,
+          folderId: created.folder_id,
+          title: created.title,
+          code: created.code,
+          config: created.config || {},
+          isShared: created.is_shared || false,
+          shareToken: created.share_token || null,
+          shareUpdatedAt: created.share_updated_at || null,
+          isDeleted: created.is_deleted || false,
+          deletedAt: created.deleted_at || null,
+          createdAt: created.created_at,
+          updatedAt: created.updated_at
+        };
+
+        workspaceStore.diagrams = [newDiagram, ...workspaceStore.diagrams];
+      }
+    }
+  }
+
+  async function handleMoveDiagrams(ids: string[], targetFolderId: string | null) {
+    for (const id of ids) {
+      const target = workspaceStore.diagrams.find((d) => d.id === id);
+      if (target) {
+        target.folderId = targetFolderId;
+      }
+    }
+
+    await supabase
+      .from('diagrams')
+      .update({ folder_id: targetFolderId, updated_at: new Date().toISOString() })
+      .in('id', ids);
+  }
+
+  async function handleRenameDiagram(id: string, newTitle: string) {
+    if (!newTitle.trim()) return;
+    const diagram = workspaceStore.diagrams.find((d) => d.id === id);
+    if (diagram) diagram.title = newTitle.trim();
+    await supabase
+      .from('diagrams')
+      .update({ title: newTitle.trim(), updated_at: new Date().toISOString() })
+      .eq('id', id);
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut();
     await goto('/auth');
   }
-
 </script>
 
-<div class="h-screen w-screen flex flex-col bg-[var(--color-surface-app)] overflow-hidden">
-  <!-- Top Navigation Header -->
-  <header class="h-14 px-4 flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-surface-card)] shrink-0">
-    <div class="flex items-center gap-3">
-      <button
-        onclick={() => (sidebarOpen = !sidebarOpen)}
-        title="Toggle Sidebar"
-        class="p-1.5 rounded-[5px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-subtle)]"
-      >
-        {#if sidebarOpen}
-          <PanelLeftClose size={18} />
-        {:else}
-          <PanelLeft size={18} />
-        {/if}
-      </button>
-
-      <a href="/" class="flex items-center gap-2 group">
-        <div class="w-6 h-6 rounded flex items-center justify-center overflow-hidden">
-          <img src="/assets/logo-short-dark.png" alt="Logo" class="w-full h-full object-contain" />
-        </div>
-        <span class="font-['Instrument_Sans',sans-serif] text-[16px] font-semibold text-[var(--color-text-primary)]">
-          TxtGrph
-        </span>
-      </a>
-
-      <!-- Breadcrumb / Title Editor -->
-      {#if workspaceStore.activeDiagram}
-        <span class="text-[var(--color-text-tertiary)]">/</span>
-        {#if isEditingTitle}
-          <!-- svelte-ignore a11y_autofocus -->
-          <input
-            type="text"
-            bind:value={activeTitleInput}
-            onblur={handleTitleSave}
-            onkeydown={(e) => e.key === 'Enter' && handleTitleSave()}
-            class="h-7 px-2 text-[13px] font-medium rounded bg-[var(--color-surface-app)] border border-[var(--color-brass)] text-[var(--color-text-primary)] focus:outline-none"
-            autofocus
-          />
-        {:else}
-          <button
-            onclick={() => (isEditingTitle = true)}
-            title="Click to rename"
-            class="text-[13px] font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-subtle)] px-2 py-1 rounded transition-colors"
-          >
-            {workspaceStore.activeTitle}
-          </button>
-        {/if}
-      {/if}
-
-      <!-- Save Status Indicator -->
-      {#if workspaceStore.activeDiagram}
-        {#if workspaceStore.saveStatus === 'saving'}
-          <span class="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)]">
-            <Loader2 size={12} class="animate-spin" /> Saving...
-          </span>
-        {:else if workspaceStore.saveStatus === 'saved'}
-          <span class="inline-flex items-center gap-1 text-[11px] text-[var(--color-brass-text)] opacity-80">
-            <CheckCircle2 size={12} /> Saved
-          </span>
-        {/if}
-      {/if}
+<div class="h-screen w-screen flex bg-[#090A0F] overflow-hidden select-none font-['Instrument_Sans',sans-serif]">
+  <!-- Left Navigation Sidebar -->
+  {#if sidebarOpen && !isCanvasFullscreen}
+    <div class="w-64 shrink-0 h-full">
+      <FolderTree
+        userEmail={data.session?.user?.email || ''}
+        {sidebarOpen}
+        {favoriteIds}
+        {organizations}
+        onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
+        onCreateFolder={handleCreateFolder}
+        onCreateDiagram={handleCreateDiagram}
+        onDeleteFolder={handleDeleteFolder}
+        onDeleteDiagram={handleDeleteDiagram}
+        onOpenTrash={() => (trashModalOpen = true)}
+        onOpenSettings={() => (settingsModalOpen = true)}
+        onOpenCreateOrg={() => (createOrgModalOpen = true)}
+        onOpenOrgSettings={(id: string, name: string) => { activeOrgSettingsId = id; activeOrgSettingsName = name; orgSettingsModalOpen = true; }}
+      />
     </div>
+  {/if}
 
-    <div class="flex items-center gap-2 text-[13px]">
-      {#if workspaceStore.activeDiagram}
-        <button
-          onclick={() => (shareModalOpen = true)}
-          title="Share Diagram Link"
-          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[5px] border border-slate-700 bg-slate-800 text-slate-200 font-medium hover:bg-slate-700 transition-colors"
-        >
-          <Share2 size={15} class="text-indigo-400" />
-          <span class="hidden sm:inline">Share</span>
-        </button>
-      {/if}
-
-      <button
-        onclick={() => (trashModalOpen = true)}
-        title="Trash Bin"
-        class="relative inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[5px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-subtle)] transition-colors"
-      >
-        <Trash2 size={16} />
-        {#if workspaceStore.trashedCount > 0}
-          <span class="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500/20 text-[10px] font-bold text-red-400 border border-red-500/30 px-1">
-            {workspaceStore.trashedCount}
-          </span>
-        {/if}
-      </button>
-
-      <button
-        onclick={() => (aiModalOpen = true)}
-        title="BYOK AI Assistant"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[5px] bg-[var(--color-brass)] text-white font-medium hover:opacity-90 transition-opacity"
-      >
-        <Sparkles size={15} />
-        <span>AI Assistant</span>
-      </button>
-
-      <a
-        href="/settings"
-        title="Settings & BYOK Keys"
-        class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-[5px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-subtle)] transition-colors"
-      >
-        <Settings size={16} />
-      </a>
-
-      <span class="text-[var(--color-border-default)]">|</span>
-
-      <span class="text-[var(--color-text-secondary)] hidden sm:inline">
-        {data.session?.user?.email}
-      </span>
-      <button
-        onclick={handleSignOut}
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[5px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-subtle)] transition-colors"
-      >
-        <LogOut size={16} />
-        <span class="hidden sm:inline">Sign Out</span>
-      </button>
+  {#if showSaveToast}
+    <div class="fixed top-16 left-1/2 -translate-x-1/2 z-[200] px-4 py-2.5 rounded-2xl bg-[#0F1117]/95 border border-emerald-500/30 text-emerald-400 font-semibold text-xs shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 duration-200 backdrop-blur-xl font-['Instrument_Sans',sans-serif]">
+      <Check size={16} class="text-emerald-400 shrink-0" />
+      <span>Diagram saved to cloud (Ctrl+S)</span>
     </div>
-  </header>
+  {/if}
 
-
-  <!-- Main Viewport-Locked Studio Body -->
-  <main class="flex-1 flex min-h-0 overflow-hidden">
-    <!-- Left Navigation Sidebar -->
-    {#if sidebarOpen}
-      <div class="w-64 shrink-0 h-full">
-        <FolderTree
-          onCreateFolder={handleCreateFolder}
-          onCreateDiagram={handleCreateDiagram}
-          onDeleteFolder={handleDeleteFolder}
-          onDeleteDiagram={handleDeleteDiagram}
-        />
-      </div>
-    {/if}
-
-    <!-- Main Workspace Content -->
-    {#if workspaceStore.activeDiagram}
-      <div class="flex-1 flex min-h-0 overflow-hidden">
-        <!-- CodeMirror 6 Editor Pane -->
-        <div class="w-1/2 h-full flex flex-col border-r border-[var(--color-border-default)]">
-          <div class="h-9 px-4 flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-surface-card)] text-[12px] font-medium text-[var(--color-text-secondary)] shrink-0">
-            <span>Editor (Mermaid.js)</span>
-            <span class="text-[11px] text-[var(--color-text-tertiary)] font-['IBM_Plex_Mono',monospace]">
-              CodeMirror 6
-            </span>
-          </div>
-          <div class="flex-1 min-h-0">
-            <CodeMirrorEditor
-              value={workspaceStore.activeCode}
-              onchange={handleCodeChange}
-            />
-          </div>
-        </div>
-
-        <!-- Live Mermaid Preview Canvas Pane -->
-        <div class="w-1/2 h-full flex flex-col bg-[var(--color-surface-app)]">
-          <!-- Canvas Toolbar -->
-          <div class="h-9 px-4 flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-surface-card)] text-[12px] font-medium text-[var(--color-text-secondary)] shrink-0">
-            <div class="flex items-center gap-2">
-              <span>Preview</span>
-              {#if isRendering}
-                <Loader2 size={12} class="animate-spin text-[var(--color-brass)]" />
-              {/if}
-            </div>
-
-            <div class="flex items-center gap-1">
-              <button
-                onclick={() => (zoomLevel = Math.max(0.5, zoomLevel - 0.1))}
-                title="Zoom Out"
-                class="p-1 rounded hover:bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)]"
-              >
-                <ZoomOut size={14} />
-              </button>
-              <span class="text-[11px] font-['IBM_Plex_Mono',monospace] px-1">
-                {Math.round(zoomLevel * 100)}%
-              </span>
-              <button
-                onclick={() => (zoomLevel = Math.min(2, zoomLevel + 0.1))}
-                title="Zoom In"
-                class="p-1 rounded hover:bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)]"
-              >
-                <ZoomIn size={14} />
-              </button>
-              <button
-                onclick={() => (zoomLevel = 1)}
-                title="Reset Zoom"
-                class="p-1 rounded hover:bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)]"
-              >
-                <Maximize2 size={14} />
-              </button>
-            </div>
-          </div>
-
-          <!-- Canvas Preview Body -->
-          <div class="flex-1 min-h-0 overflow-auto p-6 flex items-center justify-center relative">
-            {#if renderError}
-              <div class="max-w-md p-4 rounded-[6px] bg-red-950/40 border border-red-800/50 text-red-200 space-y-2 text-[13px]">
-                <div class="flex items-center gap-2 font-semibold text-red-400">
-                  <AlertCircle size={16} /> Syntax Error
-                </div>
-                <pre class="font-['IBM_Plex_Mono',monospace] text-[11px] leading-relaxed whitespace-pre-wrap overflow-x-auto">{renderError}</pre>
-              </div>
-            {:else if svgContent}
-              <div
-                class="transition-transform duration-150 ease-out origin-center"
-                style="transform: scale({zoomLevel});"
-              >
-                {@html svgContent}
-              </div>
-            {:else}
-              <div class="text-[13px] text-[var(--color-text-tertiary)]">
-                Type Mermaid syntax in the editor to preview diagram...
-              </div>
-            {/if}
-          </div>
-        </div>
-      </div>
+  <!-- Main Viewport Content Container -->
+  <main class="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+    {#if workspaceStore.activeDiagramId}
+      <DiagramCanvas
+        bind:code={workspaceStore.activeCode}
+        bind:autoSaveEnabled={autoSaveEnabled}
+        title={workspaceStore.activeTitle}
+        readOnly={false}
+        saveStatus={workspaceStore.saveStatus}
+        isFavorite={favoriteIds.has(workspaceStore.activeDiagramId || '')}
+        folderName={activeFolderName}
+        onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
+        onCodeChange={handleCodeChange}
+        onTitleChange={(newTitle: string) => {
+          if (workspaceStore.activeDiagramId) handleRenameDiagram(workspaceStore.activeDiagramId, newTitle);
+        }}
+        onToggleFavorite={() => {
+          if (workspaceStore.activeDiagramId) toggleFavorite(workspaceStore.activeDiagramId);
+        }}
+        onOpenComments={() => (commentsModalOpen = true)}
+        onOpenHistory={() => (versionHistoryModalOpen = true)}
+        onOpenShare={() => (shareModalOpen = true)}
+        onOpenExport={() => (advancedExportModalOpen = true)}
+        onOpenTemplates={() => (templatesModalOpen = true)}
+        onOpenAI={() => (aiModalOpen = true)}
+        onDuplicate={() => {
+          if (workspaceStore.activeDiagramId) handleDuplicateDiagrams([workspaceStore.activeDiagramId]);
+        }}
+        onMove={() => {
+          if (workspaceStore.activeDiagramId) {
+            multiMoveModalIds = [workspaceStore.activeDiagramId];
+            multiMoveModalOpen = true;
+          }
+        }}
+        onDelete={() => {
+          if (workspaceStore.activeDiagramId) handleDeleteDiagram(workspaceStore.activeDiagramId);
+        }}
+      />
     {:else}
-      <!-- Empty Workspace State -->
-      <div class="flex-1 flex items-center justify-center p-6 text-center">
-        <div class="max-w-md mx-auto p-8 rounded-[8px] border border-[var(--color-border-default)] bg-[var(--color-surface-card)] space-y-5 shadow-sm">
-          <div class="w-12 h-12 mx-auto rounded-full bg-[var(--color-surface-subtle)] border border-[var(--color-border-strong)] flex items-center justify-center text-[var(--color-brass-text)]">
-            <Plus size={24} strokeWidth={1.5} />
-          </div>
-
-          <div class="space-y-2">
-            <h3 class="font-['Instrument_Sans',sans-serif] text-[17px] font-semibold text-[var(--color-text-primary)]">
-              No Diagram Selected
-            </h3>
-            <p class="text-[14px] leading-[21px] text-[var(--color-text-secondary)]">
-              Select a diagram from the sidebar or create a new one to start drafting and organizing.
-            </p>
-          </div>
-
-          <div class="pt-2">
-            <button
-              onclick={() => handleCreateDiagram('Untitled Diagram', null)}
-              class="inline-flex items-center justify-center gap-2 h-10 px-5 text-[14px] font-medium rounded-[5px] bg-[var(--color-ink)] text-[#FAF9F6] shadow-sm hover:opacity-95 transition-opacity"
-            >
-              <Plus size={18} strokeWidth={1.5} />
-              <span>Create New Diagram</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <DashboardGallery
+        diagrams={workspaceStore.diagrams}
+        folders={workspaceStore.folders}
+        activeFolderId={workspaceStore.activeFolderId}
+        {favoriteIds}
+        {sidebarOpen}
+        onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
+        onSelectDiagram={(id: string) => { workspaceStore.selectDiagram(id); sidebarOpen = false; }}
+        onSelectFolder={(id: string | null) => workspaceStore.selectFolder(id)}
+        onCreateDiagram={(folderId?: string | null) => { handleCreateDiagram('Untitled Diagram', folderId || null); }}
+        onCreateFolder={(parentId?: string | null) => { handleCreateFolder('new folder', parentId || null); }}
+        onOpenAiModal={() => (aiModalOpen = true)}
+        onToggleFavorite={toggleFavorite}
+        onShareDiagram={(diagram: Diagram) => {
+          workspaceStore.selectDiagram(diagram.id);
+          sidebarOpen = false;
+          shareModalOpen = true;
+        }}
+        onDeleteDiagram={(id: string) => handleDeleteDiagram(id)}
+        onDeleteFolder={(id: string) => handleDeleteFolder(id)}
+        onDuplicateDiagrams={handleDuplicateDiagrams}
+        onMoveDiagrams={handleMoveDiagrams}
+      />
     {/if}
   </main>
 </div>
@@ -474,6 +1043,7 @@
   bind:isOpen={aiModalOpen}
   currentCode={workspaceStore.activeCode}
   onApply={(newCode: string) => handleCodeChange(newCode)}
+  onOpenSettings={() => (settingsModalOpen = true)}
 />
 
 <ShareModal
@@ -487,3 +1057,67 @@
   onclose={() => (trashModalOpen = false)}
 />
 
+<SettingsModal
+  open={settingsModalOpen}
+  userEmail={data.session?.user?.email || ''}
+  onclose={() => (settingsModalOpen = false)}
+/>
+
+<CreateOrgModal
+  open={createOrgModalOpen}
+  onCreateOrg={handleCreateOrg}
+  onclose={() => (createOrgModalOpen = false)}
+/>
+
+<AdvancedExportModal
+  open={advancedExportModalOpen}
+  code={workspaceStore.activeCode}
+  title={workspaceStore.activeTitle}
+  onclose={() => (advancedExportModalOpen = false)}
+/>
+
+<TemplatesModal
+  open={templatesModalOpen}
+  onSelectTemplate={(code, title) => {
+    handleCodeChange(code);
+    workspaceStore.updateActiveTitle(title);
+  }}
+  onclose={() => (templatesModalOpen = false)}
+/>
+
+<OrgSettingsModal
+  open={orgSettingsModalOpen}
+  orgId={activeOrgSettingsId}
+  orgName={activeOrgSettingsName}
+  userEmail={data.session?.user?.email || ''}
+  onclose={() => (orgSettingsModalOpen = false)}
+/>
+
+<VersionHistoryModal
+  open={versionHistoryModalOpen}
+  diagramId={workspaceStore.activeDiagramId}
+  currentCode={workspaceStore.activeCode}
+  userEmail={data.session?.user?.email || ''}
+  onRestore={(versionCode) => {
+    handleCodeChange(versionCode);
+  }}
+  onclose={() => (versionHistoryModalOpen = false)}
+/>
+
+<CommentsModal
+  open={commentsModalOpen}
+  diagramId={workspaceStore.activeDiagramId}
+  userEmail={data.session?.user?.email || ''}
+  onclose={() => (commentsModalOpen = false)}
+/>
+
+<MultiMoveModal
+  open={multiMoveModalOpen}
+  selectedCount={multiMoveModalIds.length}
+  folders={workspaceStore.folders}
+  onMove={(targetFolderId: string | null) => {
+    handleMoveDiagrams(multiMoveModalIds, targetFolderId);
+    multiMoveModalOpen = false;
+  }}
+  onclose={() => (multiMoveModalOpen = false)}
+/>

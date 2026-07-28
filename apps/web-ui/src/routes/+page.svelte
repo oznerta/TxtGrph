@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import mermaid from 'mermaid';
-  import Dropdown from '$lib/components/Dropdown.svelte';
+  import CustomSelect from '$lib/components/ui/CustomSelect.svelte';
   import { CoreVersion } from '@txtgrph/core';
   import {
     Code2,
@@ -1316,22 +1316,34 @@
 
         <!-- High-Visibility Floating Canvas Error Banner (Top-Center, Above All Tools) -->
         {#if renderError}
-          <div class="absolute top-6 inset-x-0 z-[70] flex justify-center pointer-events-none px-4">
-            <div class="pointer-events-auto max-w-lg w-full px-4.5 py-3 rounded-2xl bg-[#1A0B0E]/95 border border-red-500/40 shadow-2xl backdrop-blur-xl text-red-200 text-[12.5px] font-['IBM_Plex_Mono',monospace] flex items-center gap-3 animate-in fade-in duration-150">
-              <div class="w-6 h-6 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+          <div class="absolute top-6 inset-x-0 z-[75] flex justify-center pointer-events-none px-4">
+            <div class="pointer-events-auto max-w-xl w-full px-4.5 py-3 rounded-2xl bg-[#1A0B0E]/95 border border-red-500/40 shadow-2xl backdrop-blur-xl text-red-200 text-[12.5px] font-['IBM_Plex_Mono',monospace] flex items-start gap-3 animate-in fade-in duration-150 select-text">
+              <div class="w-6 h-6 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 mt-0.5">
                 <AlertCircle size={14} />
               </div>
               <div class="flex-1 min-w-0">
-                <div class="font-semibold text-red-300 text-[12px]">Mermaid Syntax Error</div>
-                <div class="text-[11.5px] text-red-200/80 truncate">{renderError}</div>
+                <div class="font-semibold text-red-300 text-[12px] mb-0.5">Mermaid Syntax Error</div>
+                <div class="text-[11.5px] text-red-200/90 leading-relaxed break-words max-h-32 overflow-y-auto custom-scrollbar select-text selection:bg-red-500/30 selection:text-white">
+                  {renderError}
+                </div>
               </div>
-              <button
-                onclick={() => (renderError = null)}
-                class="p-1 rounded-lg text-red-300/60 hover:text-red-200 hover:bg-white/10 transition-colors cursor-pointer"
-                title="Dismiss Error"
-              >
-                <X size={14} />
-              </button>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button
+                  onclick={() => navigator.clipboard.writeText(renderError || '')}
+                  class="px-2.5 py-1 rounded-lg bg-red-500/15 border border-red-500/30 text-red-200 hover:text-white hover:bg-red-500/30 transition-all text-[11px] font-medium flex items-center gap-1 cursor-pointer"
+                  title="Copy error message to clipboard"
+                >
+                  <Copy size={12} />
+                  <span>Copy</span>
+                </button>
+                <button
+                  onclick={() => (renderError = null)}
+                  class="p-1.5 rounded-lg text-red-300/60 hover:text-red-200 hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Dismiss Error"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             </div>
           </div>
         {/if}
@@ -1684,8 +1696,8 @@
 
           {#if renderedSvg}
             <div
-              class="w-full h-full flex items-center justify-center origin-center [&_svg]:max-w-full [&_svg]:h-auto"
-              style="transform: translate3d({editorCollapsed ? 0 : panX}px, {panY}px, 0px) scale({zoomScale}); will-change: transform; transition: {isPanning ? 'none' : 'transform 0.15s cubic-bezier(0.16, 1, 0.3, 1)'};"
+              class="w-full h-full flex items-center justify-center origin-center [&_svg]:max-w-full [&_svg]:h-auto [shape-rendering:geometricPrecision] [text-rendering:geometricPrecision]"
+              style="transform: translate({panX}px, {panY}px) scale({zoomScale}); transition: {isPanning ? 'none' : 'transform 0.15s cubic-bezier(0.16, 1, 0.3, 1)'};"
             >
               {@html renderedSvg}
             </div>
@@ -2106,7 +2118,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 font-['IBM_Plex_Mono',monospace]">
             <div class="flex items-center gap-2">
               <Filter size={14} class="text-white/50" />
-              <Dropdown
+              <CustomSelect
                 options={templateCategoryOptions}
                 bind:value={selectedCategoryFilter}
               />

@@ -10,10 +10,13 @@ export const load: PageLoad = async ({ params }) => {
   }
 
   const supabase = createSupabaseBrowserClient();
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userEmail = sessionData?.session?.user?.email || null;
+  const userId = sessionData?.session?.user?.id || null;
 
   const { data: diagramData, error: dbError } = await supabase
     .from('diagrams')
-    .select('id, share_token, title, code, config, updated_at, is_shared, is_deleted')
+    .select('id, user_id, share_token, title, code, config, updated_at, is_shared, is_deleted')
     .eq('share_token', token)
     .eq('is_shared', true)
     .eq('is_deleted', false)
@@ -21,6 +24,24 @@ export const load: PageLoad = async ({ params }) => {
 
   if (dbError || !diagramData) {
     throw error(404, 'This diagram link is invalid, revoked, or has been deleted.');
+  }
+
+  let userRole: 'editor' | 'viewer' = 'viewer';
+
+  // Check if current user is owner or explicit collaborator with editor role
+  if (userId && diagramData.user_id === userId) {
+    userRole = 'editor';
+  } else if (userEmail) {
+    const { data: collab } = await supabase
+      .from('diagram_collaborators')
+      .select('role')
+      .eq('diagram_id', diagramData.id)
+      .eq('user_email', userEmail)
+      .maybeSingle();
+
+    if (collab?.role === 'editor') {
+      userRole = 'editor';
+    }
   }
 
   const sharedDiagram: SharedDiagramPayload = {
@@ -32,7 +53,18 @@ export const load: PageLoad = async ({ params }) => {
     updatedAt: diagramData.updated_at
   };
 
+  const config = (diagramData.config || {}) as any;
+  const allowComments = config.allowComments !== false;
+  const allowTimeline = config.allowTimeline === true;
+  const allowForking = config.allowForking !== false;
+
   return {
-    diagram: sharedDiagram
+    diagram: sharedDiagram,
+    userRole,
+    userEmail,
+    isLoggedIn: !!userId,
+    allowComments,
+    allowTimeline,
+    allowForking
   };
 };

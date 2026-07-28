@@ -1,8 +1,60 @@
-import type { Folder, Diagram } from '@txtgrph/core';
+export interface Folder {
+  id: string;
+  userId: string;
+  parentId: string | null;
+  name: string;
+  color?: string | null;
+  icon?: string | null;
+  isDeleted: boolean;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Diagram {
+  id: string;
+  userId: string;
+  folderId: string | null;
+  title: string;
+  code: string;
+  config: Record<string, unknown>;
+  isShared: boolean;
+  shareToken?: string | null;
+  shareUpdatedAt?: string | null;
+  isDeleted: boolean;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  ownerId: string;
+}
+
+export interface OrganizationMember {
+  id: string;
+  organizationId: string;
+  userId: string;
+  email: string;
+  role: 'owner' | 'admin' | 'member' | 'viewer';
+}
+
+export interface DiagramCollaborator {
+  id: string;
+  diagramId: string;
+  userId?: string | null;
+  email: string;
+  role: 'editor' | 'viewer';
+}
 
 export class WorkspaceStore {
   folders = $state<Folder[]>([]);
   diagrams = $state<Diagram[]>([]);
+  organizations = $state<Organization[]>([]);
+  activeOrgId = $state<string | null>(null);
   activeDiagramId = $state<string | null>(null);
   activeFolderId = $state<string | null>(null);
   searchQuery = $state<string>('');
@@ -25,10 +77,23 @@ export class WorkspaceStore {
     return this.activeDiagram?.title || 'Untitled Diagram';
   }
 
+  // Active Folder derived lookup
+  get activeFolder(): Folder | null {
+    if (!this.activeFolderId) return null;
+    return this.folders.find((f) => f.id === this.activeFolderId && !f.isDeleted) || null;
+  }
+
+  // Select active folder for gallery view navigation
+  selectFolder(folderId: string | null) {
+    this.activeFolderId = folderId;
+    this.activeDiagramId = null;
+  }
+
   // Initialize store from server load data
-  init(folders: Folder[], diagrams: Diagram[], initialDiagramId?: string | null) {
+  init(folders: Folder[], diagrams: Diagram[], initialDiagramId?: string | null, orgs: Organization[] = []) {
     this.folders = folders;
     this.diagrams = diagrams;
+    this.organizations = orgs;
     if (initialDiagramId && diagrams.some((d) => d.id === initialDiagramId)) {
       this.activeDiagramId = initialDiagramId;
     } else if (diagrams.length > 0) {
@@ -50,6 +115,22 @@ export class WorkspaceStore {
   // Select active diagram
   selectDiagram(diagramId: string) {
     this.activeDiagramId = diagramId;
+  }
+
+  // Update active diagram code
+  updateActiveCode(newCode: string) {
+    const target = this.diagrams.find((d) => d.id === this.activeDiagramId);
+    if (target) {
+      target.code = newCode;
+    }
+  }
+
+  // Update active diagram title
+  updateActiveTitle(newTitle: string) {
+    const target = this.diagrams.find((d) => d.id === this.activeDiagramId);
+    if (target) {
+      target.title = newTitle;
+    }
   }
 
   // Active Folders derived lookup (non-deleted)
