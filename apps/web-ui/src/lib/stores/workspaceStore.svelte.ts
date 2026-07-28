@@ -74,9 +74,23 @@ export class WorkspaceStore {
     return this.activeDiagram?.code || '';
   }
 
+  set activeCode(newCode: string) {
+    const target = this.activeDiagram;
+    if (target) {
+      target.code = newCode;
+    }
+  }
+
   // Active Diagram Title
   get activeTitle(): string {
     return this.activeDiagram?.title || 'Untitled Diagram';
+  }
+
+  set activeTitle(newTitle: string) {
+    const target = this.activeDiagram;
+    if (target) {
+      target.title = newTitle;
+    }
   }
 
   // Active Folder derived lookup
