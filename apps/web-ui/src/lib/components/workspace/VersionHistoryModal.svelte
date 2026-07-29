@@ -99,33 +99,56 @@
     }
   });
 
+  let animFrameId: number | null = null;
+
   function resetZoom() {
     scale = 1;
     panX = 0;
     panY = 0;
   }
 
+  function zoomIn() {
+    scale = Math.min(5.0, Math.round((scale + 0.25) * 100) / 100);
+  }
+
+  function zoomOut() {
+    scale = Math.max(0.2, Math.round((scale - 0.25) * 100) / 100);
+  }
+
   function handleWheel(e: WheelEvent) {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-    scale = Math.min(Math.max(0.3, scale * zoomFactor), 4.0);
+    scale = Math.min(Math.max(0.2, scale * zoomFactor), 5.0);
   }
 
-  function startPan(e: MouseEvent) {
+  function handlePointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
     isPanning = true;
     startX = e.clientX - panX;
     startY = e.clientY - panY;
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (err) {}
   }
 
-  function panMove(e: MouseEvent) {
+  function handlePointerMove(e: PointerEvent) {
     if (!isPanning) return;
-    panX = e.clientX - startX;
-    panY = e.clientY - startY;
+    const newX = e.clientX - startX;
+    const newY = e.clientY - startY;
+    if (animFrameId) cancelAnimationFrame(animFrameId);
+    animFrameId = requestAnimationFrame(() => {
+      panX = newX;
+      panY = newY;
+    });
   }
 
-  function endPan() {
-    isPanning = false;
+  function handlePointerUp(e: PointerEvent) {
+    if (isPanning) {
+      isPanning = false;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch (err) {}
+    }
   }
 
   function loadLocalEditHistory() {
@@ -573,10 +596,10 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 onwheel={handleWheel}
-                onmousedown={startPan}
-                onmousemove={panMove}
-                onmouseup={endPan}
-                onmouseleave={endPan}
+                onpointerdown={handlePointerDown}
+                onpointermove={handlePointerMove}
+                onpointerup={handlePointerUp}
+                onpointercancel={handlePointerUp}
                 class="flex-1 relative rounded-2xl bg-[#090A0F] border border-white/10 p-4 flex items-center justify-center overflow-hidden transition-all select-none {isPanning ? 'cursor-grabbing' : 'cursor-grab'}"
               >
                 {#if isRendering}
@@ -595,8 +618,8 @@
 
                 <!-- Scaled & Panned SVG Inner Box -->
                 <div
-                  class="w-full h-full flex items-center justify-center transition-transform duration-75"
-                  style="transform: translate({panX}px, {panY}px) scale({scale}); transform-origin: center center;"
+                  class="w-full h-full flex items-center justify-center"
+                  style="transform: translate3d({panX}px, {panY}px, 0) scale({scale}); transform-origin: center center; will-change: transform;"
                 >
                   <div bind:this={previewContainer} class="ver-preview-wrapper"></div>
                 </div>

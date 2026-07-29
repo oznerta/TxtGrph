@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, Download, Copy, Check, FileCode, Image as ImageIcon, FileText, Sparkles, Layers, Palette, Maximize, Code, Eye, RefreshCw } from 'lucide-svelte';
+  import { X, Download, Copy, Check, FileCode, Image as ImageIcon, FileText, Sparkles, Layers, Palette, Maximize, Code, Eye, RefreshCw, Plus, Minus } from 'lucide-svelte';
   import mermaid from 'mermaid';
 
   interface Props {
@@ -25,11 +25,70 @@
   let previewWidth = $state(800);
   let previewHeight = $state(500);
 
+  // Live Export Preview Interactive Pan & Zoom State
+  let previewScale = $state(1);
+  let previewPanX = $state(0);
+  let previewPanY = $state(0);
+  let isPanningPreview = $state(false);
+  let previewStartX = 0;
+  let previewStartY = 0;
+  let previewAnimFrameId: number | null = null;
+
   $effect(() => {
     if (open && code) {
       updatePreview();
     }
   });
+
+  function resetPreviewZoom() {
+    previewScale = 1;
+    previewPanX = 0;
+    previewPanY = 0;
+  }
+
+  function previewZoomIn() {
+    previewScale = Math.min(5.0, Math.round((previewScale + 0.25) * 100) / 100);
+  }
+
+  function previewZoomOut() {
+    previewScale = Math.max(0.2, Math.round((previewScale - 0.25) * 100) / 100);
+  }
+
+  function handlePreviewWheel(e: WheelEvent) {
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+    previewScale = Math.min(Math.max(0.2, previewScale * zoomFactor), 5.0);
+  }
+
+  function handlePreviewPointerDown(e: PointerEvent) {
+    if (e.button !== 0) return;
+    isPanningPreview = true;
+    previewStartX = e.clientX - previewPanX;
+    previewStartY = e.clientY - previewPanY;
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch (err) {}
+  }
+
+  function handlePreviewPointerMove(e: PointerEvent) {
+    if (!isPanningPreview) return;
+    const newX = e.clientX - previewStartX;
+    const newY = e.clientY - previewStartY;
+    if (previewAnimFrameId) cancelAnimationFrame(previewAnimFrameId);
+    previewAnimFrameId = requestAnimationFrame(() => {
+      previewPanX = newX;
+      previewPanY = newY;
+    });
+  }
+
+  function handlePreviewPointerUp(e: PointerEvent) {
+    if (isPanningPreview) {
+      isPanningPreview = false;
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch (err) {}
+    }
+  }
 
   async function updatePreview() {
     if (!code || !code.trim()) return;
@@ -328,19 +387,30 @@
             </span>
           </div>
 
-          <!-- Preview Stage Box -->
-          <div class="relative w-full h-[320px] rounded-2xl border border-white/15 overflow-hidden flex items-center justify-center p-3 bg-[#0A0B0E] group select-none">
+          <!-- Interactive Pan & Zoom Preview Stage Box -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            onwheel={handlePreviewWheel}
+            onpointerdown={handlePreviewPointerDown}
+            onpointermove={handlePreviewPointerMove}
+            onpointerup={handlePreviewPointerUp}
+            onpointercancel={handlePreviewPointerUp}
+            class="relative w-full h-[320px] rounded-2xl border border-white/15 overflow-hidden flex items-center justify-center p-3 bg-[#0A0B0E] group select-none {isPanningPreview ? 'cursor-grabbing' : 'cursor-grab'}"
+          >
             <!-- Background checkerboard pattern for transparency -->
             <div class="absolute inset-0 bg-[conic-gradient(#1A1D28_90deg,#12141D_90deg_180deg,#1A1D28_180deg_270deg,#12141D_270deg)] [background-size:16px_16px]"></div>
 
-            <!-- Styled Diagram Container -->
+            <!-- Scaled & Panned Diagram Inner Frame -->
             <div
-              class="relative max-w-full max-h-full flex items-center justify-center transition-all duration-200 rounded-xl overflow-hidden shadow-2xl"
+              class="relative max-w-full max-h-full flex items-center justify-center rounded-xl overflow-hidden shadow-2xl transition-transform duration-75"
               style="
                 background-color: {getCanvasBgColor()};
                 padding: {Math.round(selectedPadding / 2)}px;
                 {selectedBgPreset === 'dark-mesh' ? 'background-image: radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px); background-size: 16px 16px;' : ''}
                 {selectedBgPreset === 'pure-light' ? 'color: #000;' : ''}
+                transform: translate3d({previewPanX}px, {previewPanY}px, 0) scale({previewScale});
+                transform-origin: center center;
+                will-change: transform;
               "
             >
               {#if isGeneratingPreview}
@@ -355,6 +425,34 @@
               {:else}
                 <div class="text-xs text-white/40 py-12">No diagram content</div>
               {/if}
+            </div>
+
+            <!-- Floating Zoom & Pan Controls Pill on Bottom-Right -->
+            <div class="absolute bottom-3 right-3 z-30 flex items-center gap-1 p-1 rounded-xl border border-white/15 bg-[#12141C]/90 backdrop-blur-md text-white/80 shadow-lg text-xs font-['IBM_Plex_Mono',monospace]">
+              <button
+                type="button"
+                onclick={previewZoomOut}
+                title="Zoom Out"
+                class="p-1.5 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer"
+              >
+                <Minus size={13} />
+              </button>
+              <button
+                type="button"
+                onclick={resetPreviewZoom}
+                title="Reset Zoom & Pan"
+                class="px-2 py-1 rounded-lg hover:bg-white/10 text-[11px] font-bold text-amber-400 transition-colors cursor-pointer"
+              >
+                {Math.round(previewScale * 100)}%
+              </button>
+              <button
+                type="button"
+                onclick={previewZoomIn}
+                title="Zoom In"
+                class="p-1.5 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer"
+              >
+                <Plus size={13} />
+              </button>
             </div>
           </div>
         </div>
