@@ -193,7 +193,7 @@
         theme: selectedMermaidTheme as any,
         securityLevel: 'loose',
         fontFamily: selectedFontFamily,
-        flowchart: { htmlLabels: false, useMaxWidth: false },
+        flowchart: { htmlLabels: true, useMaxWidth: false },
         sequence: { useMaxWidth: false },
         gantt: { useMaxWidth: false }
       });
