@@ -304,6 +304,37 @@
       favoriteIds = new Set(workspaceStore.diagrams.filter((d) => d.isShared).map((d) => d.id));
     }
 
+    // Hydrate workspace selection from URL search params on mount/refresh
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const urlSpace = searchParams.get('space');
+      const urlFolder = searchParams.get('folder');
+      const urlDiagram = searchParams.get('diagram');
+
+      if (urlSpace) {
+        workspaceStore.selectOrg(urlSpace);
+      }
+      if (urlFolder) {
+        workspaceStore.selectFolder(urlFolder);
+      }
+      if (urlDiagram) {
+        workspaceStore.selectDiagram(urlDiagram);
+      }
+    }
+
+    const handlePopState = () => {
+      if (typeof window === 'undefined') return;
+      const searchParams = new URLSearchParams(window.location.search);
+      const urlSpace = searchParams.get('space');
+      const urlFolder = searchParams.get('folder');
+      const urlDiagram = searchParams.get('diagram');
+
+      workspaceStore.selectOrg(urlSpace || null);
+      workspaceStore.selectFolder(urlFolder || null);
+      workspaceStore.selectDiagram(urlDiagram || null);
+    };
+    window.addEventListener('popstate', handlePopState);
+
     const handleGlobalKeydown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.metaKey || e.ctrlKey;
       if (isCmdOrCtrl && e.key.toLowerCase() === 's') {
@@ -330,7 +361,72 @@
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       window.removeEventListener('keydown', handleGlobalKeydown);
+      window.removeEventListener('popstate', handlePopState);
     };
+  });
+
+  // Two-way reactive URL synchronization with workspaceStore state
+  let isInitialUrlHydration = true;
+  $effect(() => {
+    const activeOrg = workspaceStore.activeOrgId;
+    const activeFolder = workspaceStore.activeFolderId;
+    const activeDiagram = workspaceStore.activeDiagramId;
+
+    if (typeof window === 'undefined') return;
+
+    if (isInitialUrlHydration) {
+      isInitialUrlHydration = false;
+      return;
+    }
+
+    const currentUrl = new URL(window.location.href);
+    let urlChanged = false;
+
+    // 1. Sync Space / Organization search param
+    if (activeOrg) {
+      if (currentUrl.searchParams.get('space') !== activeOrg) {
+        currentUrl.searchParams.set('space', activeOrg);
+        urlChanged = true;
+      }
+    } else if (currentUrl.searchParams.has('space')) {
+      currentUrl.searchParams.delete('space');
+      urlChanged = true;
+    }
+
+    // 2. Sync Active Diagram or Active Folder search param
+    if (activeDiagram) {
+      if (currentUrl.searchParams.get('diagram') !== activeDiagram) {
+        currentUrl.searchParams.set('diagram', activeDiagram);
+        urlChanged = true;
+      }
+      if (currentUrl.searchParams.has('folder')) {
+        currentUrl.searchParams.delete('folder');
+        urlChanged = true;
+      }
+    } else {
+      if (currentUrl.searchParams.has('diagram')) {
+        currentUrl.searchParams.delete('diagram');
+        urlChanged = true;
+      }
+
+      if (activeFolder) {
+        if (currentUrl.searchParams.get('folder') !== activeFolder) {
+          currentUrl.searchParams.set('folder', activeFolder);
+          urlChanged = true;
+        }
+      } else if (currentUrl.searchParams.has('folder')) {
+        currentUrl.searchParams.delete('folder');
+        urlChanged = true;
+      }
+    }
+
+    if (urlChanged) {
+      goto(currentUrl.search || '/workspace', {
+        replaceState: false,
+        keepFocus: true,
+        noScroll: true
+      });
+    }
   });
 
   $effect(() => {

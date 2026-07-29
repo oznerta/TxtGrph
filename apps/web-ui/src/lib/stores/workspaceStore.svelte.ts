@@ -136,7 +136,7 @@ export class WorkspaceStore {
   }
 
   // Select active diagram
-  selectDiagram(diagramId: string) {
+  selectDiagram(diagramId: string | null) {
     this.activeDiagramId = diagramId;
   }
 
