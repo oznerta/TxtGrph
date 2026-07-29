@@ -64,7 +64,7 @@
   import OrgSettingsModal from '$lib/components/workspace/OrgSettingsModal.svelte';
   import MultiMoveModal from '$lib/components/workspace/MultiMoveModal.svelte';
   import RenameModal from '$lib/components/workspace/RenameModal.svelte';
-  import type { Diagram } from '$lib/stores/workspaceStore.svelte';
+  import type { Diagram, Folder } from '$lib/stores/workspaceStore.svelte';
   import { goto } from '$app/navigation';
   import mermaid from 'mermaid';
 
@@ -76,6 +76,7 @@
   let activeTitleInput = $state('');
 
   let shareModalOpen = $state(false);
+  let shareModalFolder = $state<Folder | null>(null);
   let trashModalOpen = $state(false);
   let settingsModalOpen = $state(false);
   let aiModalOpen = $state(false);
@@ -1175,6 +1176,10 @@
         onOpenSettings={() => (settingsModalOpen = true)}
         onOpenCreateOrg={() => (createOrgModalOpen = true)}
         onOpenOrgSettings={(id: string, name: string) => { activeOrgSettingsId = id; activeOrgSettingsName = name; orgSettingsModalOpen = true; }}
+        onShareFolder={(folder: Folder) => {
+          shareModalFolder = folder;
+          shareModalOpen = true;
+        }}
       />
     </div>
   {/if}
@@ -1251,6 +1256,10 @@
         onDuplicateDiagrams={handleDuplicateDiagrams}
         onMoveDiagrams={handleMoveDiagrams}
         onMoveFolders={handleMoveFolders}
+        onShareFolder={(folder: Folder) => {
+          shareModalFolder = folder;
+          shareModalOpen = true;
+        }}
       />
     {/if}
   </main>
@@ -1265,8 +1274,12 @@
 
 <ShareModal
   open={shareModalOpen}
-  diagram={workspaceStore.activeDiagram}
-  onclose={() => (shareModalOpen = false)}
+  diagram={shareModalFolder ? null : workspaceStore.activeDiagram}
+  folder={shareModalFolder}
+  onclose={() => {
+    shareModalOpen = false;
+    shareModalFolder = null;
+  }}
 />
 
 <TrashBinModal

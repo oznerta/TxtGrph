@@ -549,3 +549,81 @@ DROP TRIGGER IF EXISTS on_auth_user_created_profile ON auth.users;
 CREATE TRIGGER on_auth_user_created_profile
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user_profile();
+
+-- ============================================================================
+-- 9. Folder Collaborators & Recursive Parent-Child Access Control
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.folder_collaborators (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  folder_id UUID NOT NULL REFERENCES public.folders(id) ON DELETE CASCADE,
+  user_id UUID NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL CHECK (char_length(trim(email)) > 0),
+  role TEXT NOT NULL CHECK (role IN ('editor', 'commenter', 'viewer')) DEFAULT 'viewer',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT folder_collaborator_unique UNIQUE (folder_id, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_folder_collaborators_folder ON public.folder_collaborators(folder_id);
+CREATE INDEX IF NOT EXISTS idx_folder_collaborators_email ON public.folder_collaborators(email);
+
+ALTER TABLE public.folder_collaborators ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Collaborators view folder entries" ON public.folder_collaborators;
+CREATE POLICY "Collaborators view folder entries"
+  ON public.folder_collaborators FOR SELECT
+  USING (
+    user_id = auth.uid() OR
+    email = auth.email() OR
+    EXISTS (
+      SELECT 1 FROM public.folders f WHERE f.id = folder_id AND f.user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Folder owners manage collaborators" ON public.folder_collaborators;
+CREATE POLICY "Folder owners manage collaborators"
+  ON public.folder_collaborators FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.folders f WHERE f.id = folder_id AND f.user_id = auth.uid()
+    )
+  );
+
+-- Recursive function to resolve all accessible folder IDs (direct owner, org member, direct shared, or parent folder shared)
+CREATE OR REPLACE FUNCTION public.get_user_accessible_folder_ids(p_user_id UUID, p_email TEXT)
+RETURNS TABLE (folder_id UUID) AS $$
+BEGIN
+  RETURN QUERY
+  WITH RECURSIVE accessible_folders AS (
+    -- Anchor member 1: Folders owned directly by user
+    SELECT f.id
+    FROM public.folders f
+    WHERE f.user_id = p_user_id AND f.is_deleted = false
+
+    UNION
+
+    -- Anchor member 2: Folders belonging to user's organization
+    SELECT f.id
+    FROM public.folders f
+    JOIN public.organization_members om ON om.organization_id = f.organization_id
+    WHERE om.user_id = p_user_id AND f.is_deleted = false
+
+    UNION
+
+    -- Anchor member 3: Folders explicitly shared with user by email or user_id
+    SELECT fc.folder_id AS id
+    FROM public.folder_collaborators fc
+    JOIN public.folders f ON f.id = fc.folder_id
+    WHERE (fc.user_id = p_user_id OR fc.email = p_email) AND f.is_deleted = false
+
+    UNION ALL
+
+    -- Recursive member: All child sub-folders whose parent_id is inside accessible_folders
+    SELECT child.id
+    FROM public.folders child
+    JOIN accessible_folders parent ON child.parent_id = parent.id
+    WHERE child.is_deleted = false
+  )
+  SELECT DISTINCT af.id FROM accessible_folders af;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

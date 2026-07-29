@@ -38,6 +38,7 @@
     onOpenSettings?: () => void;
     onOpenCreateOrg?: () => void;
     onOpenOrgSettings?: (id: string, orgName: string) => void;
+    onShareFolder?: (folder: Folder) => void;
   }
 
   let {
@@ -55,7 +56,8 @@
     onOpenTrash = () => {},
     onOpenSettings = () => {},
     onOpenCreateOrg = () => {},
-    onOpenOrgSettings = () => {}
+    onOpenOrgSettings = () => {},
+    onShareFolder = () => {}
   }: Props = $props();
 
   let newFolderName = $state('');
@@ -152,6 +154,16 @@
         >
           <span>New diagram</span>
           <Plus size={12} />
+        </button>
+        <button
+          onclick={() => {
+            activeMenuFolderId = null;
+            onShareFolder(folder);
+          }}
+          class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-white/10 text-white"
+        >
+          <span>Share folder</span>
+          <Share2 size={12} class="text-sky-400" />
         </button>
         <button
           onclick={() => {

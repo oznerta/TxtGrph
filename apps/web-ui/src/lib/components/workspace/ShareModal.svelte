@@ -1,13 +1,14 @@
 <script lang="ts">
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { workspaceStore } from '$lib/stores/workspaceStore.svelte';
-  import type { Diagram } from '@txtgrph/core';
-  import { Share2, Copy, Check, RefreshCw, X, Link2, ShieldAlert, UserPlus, Users, Mail, Trash2 } from 'lucide-svelte';
+  import type { Diagram, Folder } from '@txtgrph/core';
+  import { Share2, Copy, Check, RefreshCw, X, Link2, ShieldAlert, UserPlus, Users, Mail, Trash2, Folder as FolderIcon, Info } from 'lucide-svelte';
   import CustomSelect, { type SelectOption } from '$lib/components/ui/CustomSelect.svelte';
 
   interface Props {
     open: boolean;
-    diagram: Diagram | null;
+    diagram?: Diagram | null;
+    folder?: Folder | null;
     onclose: () => void;
   }
 
@@ -17,7 +18,7 @@
     role: 'editor' | 'commenter' | 'viewer';
   }
 
-  let { open = false, diagram = null, onclose }: Props = $props();
+  let { open = false, diagram = null, folder = null, onclose }: Props = $props();
 
   const supabase = createSupabaseBrowserClient();
 
@@ -25,7 +26,7 @@
   let isSaving = $state(false);
   let errorMessage = $state<string | null>(null);
 
-  // Granular Sharing Permissions
+  // Granular Sharing Permissions for Diagram
   let allowComments = $state(true);
   let allowTimeline = $state(false);
   let allowForking = $state(true);
@@ -153,8 +154,12 @@
   }
 
   $effect(() => {
-    if (open && diagram?.id) {
-      loadCollaborators(diagram.id);
+    if (open) {
+      if (folder?.id) {
+        loadFolderCollaborators(folder.id);
+      } else if (diagram?.id) {
+        loadCollaborators(diagram.id);
+      }
     }
   });
 
@@ -178,25 +183,60 @@
     }
   }
 
+  async function loadFolderCollaborators(folderId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('folder_collaborators')
+        .select('id, email, role')
+        .eq('folder_id', folderId);
+
+      if (error) throw error;
+      if (data) {
+        collaborators = data.map((c: any) => ({
+          id: c.id,
+          email: c.email,
+          role: c.role
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to load folder collaborators:', err);
+    }
+  }
+
   async function handleInviteCollaborator() {
-    if (!diagram || !inviteEmail.trim()) return;
+    if (!inviteEmail.trim()) return;
     const targetEmail = inviteEmail.trim().toLowerCase();
     errorMessage = null;
 
     try {
-      const { data, error } = await supabase
-        .from('diagram_collaborators')
-        .insert({
-          diagram_id: diagram.id,
-          email: targetEmail,
-          role: inviteRole
-        })
-        .select('id')
-        .single();
+      if (folder) {
+        const { data, error } = await supabase
+          .from('folder_collaborators')
+          .insert({
+            folder_id: folder.id,
+            email: targetEmail,
+            role: inviteRole
+          })
+          .select('id')
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
+        collaborators = [...collaborators, { id: data?.id || crypto.randomUUID(), email: targetEmail, role: inviteRole }];
+      } else if (diagram) {
+        const { data, error } = await supabase
+          .from('diagram_collaborators')
+          .insert({
+            diagram_id: diagram.id,
+            email: targetEmail,
+            role: inviteRole
+          })
+          .select('id')
+          .single();
 
-      collaborators = [...collaborators, { id: data?.id || crypto.randomUUID(), email: targetEmail, role: inviteRole }];
+        if (error) throw error;
+        collaborators = [...collaborators, { id: data?.id || crypto.randomUUID(), email: targetEmail, role: inviteRole }];
+      }
+
       inviteEmail = '';
       inviteSuccess = true;
       setTimeout(() => (inviteSuccess = false), 2500);
@@ -208,7 +248,11 @@
 
   async function handleRemoveCollaborator(id: string) {
     try {
-      await supabase.from('diagram_collaborators').delete().eq('id', id);
+      if (folder) {
+        await supabase.from('folder_collaborators').delete().eq('id', id);
+      } else {
+        await supabase.from('diagram_collaborators').delete().eq('id', id);
+      }
       collaborators = collaborators.filter((c) => c.id !== id);
     } catch (err: any) {
       console.error('Failed to remove collaborator:', err);
@@ -224,7 +268,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if open && diagram}
+{#if open && (diagram || folder)}
   <!-- Backdrop -->
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_interactive_supports_focus a11y_consider_explicit_label -->
   <div
@@ -244,14 +288,18 @@
       <div class="flex items-center justify-between border-b border-white/10 pb-4 shrink-0">
         <div class="flex items-center gap-3">
           <div class="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-            <Share2 class="h-4.5 w-4.5" />
+            {#if folder}
+              <FolderIcon class="h-4.5 w-4.5" />
+            {:else}
+              <Share2 class="h-4.5 w-4.5" />
+            {/if}
           </div>
           <div>
             <h3 id="share-modal-title" class="text-base font-bold text-white tracking-tight">
-              Share Diagram
+              {folder ? 'Share Folder' : 'Share Diagram'}
             </h3>
             <p class="text-xs text-white/50 truncate max-w-[280px]">
-              {diagram.title}
+              {folder ? folder.name : diagram?.title}
             </p>
           </div>
         </div>
@@ -274,37 +322,51 @@
           </div>
         {/if}
 
-        <!-- Toggle Public Access -->
-        <div class="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
-          <div>
-            <div class="text-sm font-semibold text-white">Public Link Access</div>
-            <div class="text-xs text-white/50 mt-0.5">
-              {diagram.isShared
-                ? 'Anyone with the link can view this diagram in read-only mode'
-                : 'Only you & invited collaborators can view'}
+        {#if folder}
+          <div class="flex items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/10 p-3.5 text-xs text-sky-200">
+            <Info class="h-4 w-4 shrink-0 text-sky-400 mt-0.5" />
+            <div>
+              <span class="font-bold text-sky-300">Recursive Folder Access</span>
+              <p class="text-sky-200/80 text-[11px] mt-0.5">
+                Collaborators invited to <strong class="text-white">{folder.name}</strong> will automatically gain access to all current and future nested sub-folders and diagrams in this folder tree.
+              </p>
             </div>
           </div>
-          <button
-            type="button"
-            onclick={handleToggleShare}
-            disabled={isSaving}
-            aria-label="Toggle Public Link Access"
-            class={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-              diagram.isShared ? 'bg-emerald-500' : 'bg-white/20'
-            }`}
-            role="switch"
-            aria-checked={diagram.isShared}
-          >
-            <span
-              class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                diagram.isShared ? 'translate-x-5' : 'translate-x-0'
+        {/if}
+
+        <!-- Toggle Public Access (For Diagram) -->
+        {#if diagram}
+          <div class="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <div>
+              <div class="text-sm font-semibold text-white">Public Link Access</div>
+              <div class="text-xs text-white/50 mt-0.5">
+                {diagram.isShared
+                  ? 'Anyone with the link can view this diagram in read-only mode'
+                  : 'Only you & invited collaborators can view'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onclick={handleToggleShare}
+              disabled={isSaving}
+              aria-label="Toggle Public Link Access"
+              class={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                diagram.isShared ? 'bg-emerald-500' : 'bg-white/20'
               }`}
-            ></span>
-          </button>
-        </div>
+              role="switch"
+              aria-checked={diagram.isShared}
+            >
+              <span
+                class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                  diagram.isShared ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              ></span>
+            </button>
+          </div>
+        {/if}
 
         <!-- Share URL Field (when enabled) -->
-        {#if diagram.isShared}
+        {#if diagram && diagram.isShared}
           <div class="space-y-2 animate-in fade-in duration-200">
             <label for="share-url-input" class="block text-xs font-semibold text-white/70">
               Shareable Web Link

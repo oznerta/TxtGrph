@@ -68,6 +68,7 @@
     onDuplicateDiagrams?: (ids: string[]) => void;
     onMoveDiagrams?: (ids: string[], targetFolderId: string | null) => void;
     onMoveFolders?: (ids: string[], targetFolderId: string | null) => void;
+    onShareFolder?: (folder: Folder) => void;
   }
 
   let {
@@ -91,6 +92,7 @@
     onDuplicateDiagrams = () => {},
     onMoveDiagrams = () => {},
     onMoveFolders = () => {},
+    onShareFolder = () => {},
   }: Props = $props();
 
   let searchQuery = $state('');
@@ -547,6 +549,15 @@
                     <button
                       onclick={() => {
                         activeMenuFolderId = null;
+                        onShareFolder(folder);
+                      }}
+                      class="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-white/10 text-white"
+                    >
+                      <Share2 size={12} class="text-sky-400" /> Share folder
+                    </button>
+                    <button
+                      onclick={() => {
+                        activeMenuFolderId = null;
                         onSelectFolder(folder.id);
                       }}
                       class="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-white/10 text-white"
@@ -620,6 +631,13 @@
                   </td>
                   <td class="py-3 px-4 text-right" onclick={(e) => e.stopPropagation()}>
                     <div class="flex items-center justify-end gap-1">
+                      <button
+                        onclick={() => onShareFolder(folder)}
+                        class="p-1 rounded-lg text-white/40 hover:text-sky-400 hover:bg-white/10 transition-colors"
+                        title="Share folder"
+                      >
+                        <Share2 size={13} />
+                      </button>
                       <button
                         onclick={() => onRenameFolder(folder.id, folder.name)}
                         class="p-1 rounded-lg text-white/40 hover:text-amber-400 hover:bg-white/10 transition-colors"

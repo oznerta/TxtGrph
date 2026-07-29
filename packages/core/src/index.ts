@@ -17,6 +17,17 @@ export const FolderSchema = z.object({
 
 export type Folder = z.infer<typeof FolderSchema>;
 
+export const FolderCollaboratorSchema = z.object({
+  id: z.string().uuid(),
+  folderId: z.string().uuid(),
+  userId: z.string().uuid().nullable().optional(),
+  email: z.string().email(),
+  role: z.enum(['editor', 'commenter', 'viewer']),
+  createdAt: z.string().datetime(),
+});
+
+export type FolderCollaborator = z.infer<typeof FolderCollaboratorSchema>;
+
 export const CreateFolderInputSchema = z.object({
   name: z.string().trim().min(1, 'Folder name is required').max(255),
   parentId: z.string().uuid().nullable().optional(),
