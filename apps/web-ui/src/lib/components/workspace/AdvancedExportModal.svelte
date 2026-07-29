@@ -91,8 +91,8 @@
   }
 
   /**
-   * Parses raw Mermaid SVG output and fixes dimension attributes (width/height),
-   * ensuring crystal-sharp rasterization and responsive preview display.
+   * Parses raw Mermaid SVG output, injects required XML namespaces, and fixes dimension attributes (width/height),
+   * ensuring crystal-sharp rasterization and responsive preview display without CORS or Blob URL corruption.
    */
   function processSvg(rawSvg: string): { svg: string; width: number; height: number } {
     let width = 800;
@@ -115,8 +115,14 @@
       }
     }
 
-    // 2. Ensure root SVG has explicit numeric width, height, and viewBox
     let fixedSvg = rawSvg;
+
+    // 2. Ensure xmlns attribute is present for browser HTMLImageElement compatibility
+    if (!fixedSvg.includes('xmlns=')) {
+      fixedSvg = fixedSvg.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+
+    // 3. Ensure root SVG has explicit numeric width, height, and viewBox
     if (/width=["'][^"']*["']/i.test(fixedSvg)) {
       fixedSvg = fixedSvg.replace(/width=["'][^"']*["']/i, `width="${width}"`);
     } else {
@@ -129,7 +135,7 @@
       fixedSvg = fixedSvg.replace(/<svg\b/i, `<svg height="${height}"`);
     }
 
-    // 3. Inject crisp rendering attributes
+    // 4. Inject crisp rendering attributes
     fixedSvg = fixedSvg.replace(
       /<svg\b([^>]*)>/i,
       (match, attrs) => `<svg ${attrs} shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="crisp-edges">`
@@ -179,6 +185,65 @@
     return processSvg(rawSvg);
   }
 
+  /**
+   * Promise-based HTML5 Canvas SVG rasterizer. Uses data URL encoding for 100% reliable image loading without Blob URL taint or corruption.
+   */
+  function renderSvgToCanvas(cleanSvg: string, width: number, height: number, scale: number, padding: number, forceOpaqueBg = false): Promise<HTMLCanvasElement> {
+    return new Promise((resolve, reject) => {
+      const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(cleanSvg);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+
+      img.onload = () => {
+        const pad = padding;
+        const totalW = Math.ceil((width + pad * 2) * scale);
+        const totalH = Math.ceil((height + pad * 2) * scale);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = totalW;
+        canvas.height = totalH;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas context unavailable'));
+          return;
+        }
+
+        ctx.scale(scale, scale);
+
+        let bg = getCanvasBgColor();
+        if (forceOpaqueBg && bg === 'transparent') {
+          bg = '#0B0C10';
+        }
+
+        if (bg !== 'transparent') {
+          ctx.fillStyle = bg;
+          ctx.fillRect(0, 0, width + pad * 2, height + pad * 2);
+
+          if (selectedBgPreset === 'dark-mesh') {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+            for (let x = 12; x < width + pad * 2; x += 24) {
+              for (let y = 12; y < height + pad * 2; y += 24) {
+                ctx.beginPath();
+                ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+        }
+
+        ctx.drawImage(img, pad, pad, width, height);
+        resolve(canvas);
+      };
+
+      img.onerror = (err) => {
+        reject(err);
+      };
+
+      img.src = svgDataUrl;
+    });
+  }
+
   async function handleDownload() {
     if (!code || !code.trim()) return;
     isExporting = true;
@@ -198,7 +263,6 @@
         let finalSvg = rawSvg;
 
         if (bg !== 'transparent') {
-          // Wrap SVG with background rect if requested
           finalSvg = rawSvg.replace(
             /<svg\b([^>]*)>/i,
             `<svg $1><rect width="100%" height="100%" fill="${bg}" />`
@@ -210,80 +274,42 @@
       } else {
         // PNG, JPEG, PDF raster canvas rendering
         const { svg: cleanSvg, width: baseW, height: baseH } = await generateSvgMarkup();
-        const svgBlob = new Blob([cleanSvg], { type: 'image/svg+xml;charset=utf-8' });
-        const svgUrl = URL.createObjectURL(svgBlob);
+        const isJpeg = selectedFormat === 'JPEG';
+        const canvas = await renderSvgToCanvas(cleanSvg, baseW, baseH, selectedScale, selectedPadding, isJpeg);
 
-        const img = new Image();
-        img.onload = () => {
-          const pad = selectedPadding;
-          const scale = selectedScale;
-
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.ceil((baseW + pad * 2) * scale);
-          canvas.height = Math.ceil((baseH + pad * 2) * scale);
-
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.scale(scale, scale);
-
-            let bg = getCanvasBgColor();
-            if (selectedFormat === 'JPEG' && bg === 'transparent') {
-              bg = '#0B0C10'; // JPEG fallback for transparency
-            }
-
-            if (bg !== 'transparent') {
-              ctx.fillStyle = bg;
-              ctx.fillRect(0, 0, baseW + pad * 2, baseH + pad * 2);
-
-              if (selectedBgPreset === 'dark-mesh') {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-                for (let x = 0; x < baseW + pad * 2; x += 24) {
-                  for (let y = 0; y < baseH + pad * 2; y += 24) {
-                    ctx.beginPath();
-                    ctx.arc(x, y, 1.2, 0, Math.PI * 2);
-                    ctx.fill();
-                  }
-                }
-              }
-            }
-
-            ctx.drawImage(img, pad, pad, baseW, baseH);
-
-            if (selectedFormat === 'PDF') {
-              const dataUrl = canvas.toDataURL('image/png', 1.0);
-              const printWindow = window.open('', '_blank');
-              if (printWindow) {
-                printWindow.document.write(`
-                  <!DOCTYPE html>
-                  <html>
-                  <head>
-                    <title>${safeTitle}</title>
-                    <style>
-                      @page { size: auto; margin: 0; }
-                      body { margin: 0; padding: 0; background: ${bg === 'transparent' ? '#ffffff' : bg}; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-                      img { max-width: 100%; height: auto; display: block; margin: auto; }
-                    </style>
-                  </head>
-                  <body>
-                    <img src="${dataUrl}" onload="window.print(); setTimeout(function() { window.close(); }, 500);" />
-                  </body>
-                  </html>
-                `);
-                printWindow.document.close();
-              }
-            } else {
-              const mime = selectedFormat === 'JPEG' ? 'image/jpeg' : 'image/png';
-              const dataUrl = canvas.toDataURL(mime, 0.95);
-              const ext = selectedFormat.toLowerCase();
-              const a = document.createElement('a');
-              a.href = dataUrl;
-              a.download = `${safeTitle}.${ext}`;
-              a.click();
-            }
+        if (selectedFormat === 'PDF') {
+          const dataUrl = canvas.toDataURL('image/png', 1.0);
+          const bg = getCanvasBgColor();
+          const printWindow = window.open('', '_blank');
+          if (printWindow) {
+            printWindow.document.write(`
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <title>${safeTitle}</title>
+                <style>
+                  @page { size: auto; margin: 0; }
+                  body { margin: 0; padding: 0; background: ${bg === 'transparent' ? '#ffffff' : bg}; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+                  img { max-width: 100%; height: auto; display: block; margin: auto; }
+                </style>
+              </head>
+              <body>
+                <img src="${dataUrl}" onload="window.print(); setTimeout(function() { window.close(); }, 500);" />
+              </body>
+              </html>
+            `);
+            printWindow.document.close();
           }
-          URL.revokeObjectURL(svgUrl);
-        };
-        img.src = svgUrl;
+        } else {
+          const mime = isJpeg ? 'image/jpeg' : 'image/png';
+          const ext = isJpeg ? 'jpg' : 'png';
+
+          canvas.toBlob((blob) => {
+            if (blob) {
+              triggerBlobDownload(blob, `${safeTitle}.${ext}`);
+            }
+          }, mime, 0.95);
+        }
       }
       onclose();
     } catch (err) {
@@ -299,7 +325,7 @@
     a.href = url;
     a.download = filename;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   async function copySvgMarkup() {
@@ -317,49 +343,15 @@
     if (!code || !code.trim()) return;
     try {
       const { svg: cleanSvg, width: baseW, height: baseH } = await generateSvgMarkup();
-      const svgBlob = new Blob([cleanSvg], { type: 'image/svg+xml;charset=utf-8' });
-      const svgUrl = URL.createObjectURL(svgBlob);
+      const canvas = await renderSvgToCanvas(cleanSvg, baseW, baseH, selectedScale, selectedPadding);
 
-      const img = new Image();
-      img.onload = () => {
-        const pad = selectedPadding;
-        const scale = selectedScale;
-
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.ceil((baseW + pad * 2) * scale);
-        canvas.height = Math.ceil((baseH + pad * 2) * scale);
-
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.scale(scale, scale);
-          const bg = getCanvasBgColor();
-          if (bg !== 'transparent') {
-            ctx.fillStyle = bg;
-            ctx.fillRect(0, 0, baseW + pad * 2, baseH + pad * 2);
-            if (selectedBgPreset === 'dark-mesh') {
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-              for (let x = 0; x < baseW + pad * 2; x += 24) {
-                for (let y = 0; y < baseH + pad * 2; y += 24) {
-                  ctx.beginPath();
-                  ctx.arc(x, y, 1.2, 0, Math.PI * 2);
-                  ctx.fill();
-                }
-              }
-            }
-          }
-          ctx.drawImage(img, pad, pad, baseW, baseH);
-
-          canvas.toBlob(async (blob) => {
-            if (blob) {
-              await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-              copyImageSuccess = true;
-              setTimeout(() => (copyImageSuccess = false), 2000);
-            }
-          }, 'image/png');
+      canvas.toBlob(async (blob) => {
+        if (blob) {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+          copyImageSuccess = true;
+          setTimeout(() => (copyImageSuccess = false), 2000);
         }
-        URL.revokeObjectURL(svgUrl);
-      };
-      img.src = svgUrl;
+      }, 'image/png');
     } catch (e) {
       console.error('Copy Image failed:', e);
     }
@@ -409,7 +401,7 @@
             </span>
           </div>
 
-          <!-- Interactive Pan & Zoom Preview Stage Box -->
+          <!-- Full-Stage Canvas Preview Viewport with Background Preset & Mesh Pattern -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             onwheel={handlePreviewWheel}
@@ -417,19 +409,18 @@
             onpointermove={handlePreviewPointerMove}
             onpointerup={handlePreviewPointerUp}
             onpointercancel={handlePreviewPointerUp}
-            class="relative w-full h-[320px] rounded-2xl border border-white/15 overflow-hidden flex items-center justify-center p-3 bg-[#0A0B0E] group select-none {isPanningPreview ? 'cursor-grabbing' : 'cursor-grab'}"
+            class="relative w-full h-[320px] rounded-2xl border border-white/15 overflow-hidden flex items-center justify-center p-4 transition-all duration-200 group select-none {isPanningPreview ? 'cursor-grabbing' : 'cursor-grab'}"
+            style="
+              background-color: {getCanvasBgColor()};
+              {selectedBgPreset === 'dark-mesh' ? 'background-image: radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px); background-size: 16px 16px;' : ''}
+              {selectedBgPreset === 'transparent' ? 'background-image: conic-gradient(#1A1D28 90deg, #12141D 90deg 180deg, #1A1D28 180deg 270deg, #12141D 270deg); background-size: 16px 16px;' : ''}
+              {selectedBgPreset === 'pure-light' ? 'color: #000;' : ''}
+            "
           >
-            <!-- Background checkerboard pattern for transparency -->
-            <div class="absolute inset-0 bg-[conic-gradient(#1A1D28_90deg,#12141D_90deg_180deg,#1A1D28_180deg_270deg,#12141D_270deg)] [background-size:16px_16px]"></div>
-
-            <!-- Scaled & Panned Diagram Inner Frame -->
+            <!-- Scaled & Panned SVG Inner Content -->
             <div
-              class="relative max-w-full max-h-full flex items-center justify-center rounded-xl overflow-hidden shadow-2xl transition-transform duration-75"
+              class="w-full h-full flex items-center justify-center transition-transform duration-75"
               style="
-                background-color: {getCanvasBgColor()};
-                padding: {Math.round(selectedPadding / 2)}px;
-                {selectedBgPreset === 'dark-mesh' ? 'background-image: radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px); background-size: 16px 16px;' : ''}
-                {selectedBgPreset === 'pure-light' ? 'color: #000;' : ''}
                 transform: translate3d({previewPanX}px, {previewPanY}px, 0) scale({previewScale});
                 transform-origin: center center;
                 will-change: transform;
@@ -441,7 +432,7 @@
                   <span>Rendering preview...</span>
                 </div>
               {:else if previewSvg}
-                <div class="w-full h-full flex items-center justify-center p-2 [&_svg]:max-w-[280px] [&_svg]:max-h-[240px] [&_svg]:w-auto [&_svg]:h-auto [&_svg]:block">
+                <div class="w-full h-full flex items-center justify-center p-2 [&_svg]:max-w-full [&_svg]:max-h-full [&_svg]:w-auto [&_svg]:h-auto [&_svg]:block">
                   {@html previewSvg}
                 </div>
               {:else}
