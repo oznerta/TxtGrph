@@ -22,8 +22,8 @@
 
   let previewSvg = $state('');
   let isGeneratingPreview = $state(false);
-  let previewWidth = $state(800);
-  let previewHeight = $state(500);
+  let diagramBaseWidth = $state(800);
+  let diagramBaseHeight = $state(600);
 
   // Live Export Preview Interactive Pan & Zoom State
   let previewScale = $state(1);
@@ -90,45 +90,70 @@
     }
   }
 
+  /**
+   * Parses raw Mermaid SVG output and fixes dimension attributes (width/height),
+   * ensuring crystal-sharp rasterization and responsive preview display.
+   */
+  function processSvg(rawSvg: string): { svg: string; width: number; height: number } {
+    let width = 800;
+    let height = 600;
+
+    // 1. Extract dimensions from viewBox or width/height attributes
+    const viewBoxMatch = rawSvg.match(/viewBox=["']([^"']+)["']/i);
+    if (viewBoxMatch) {
+      const parts = viewBoxMatch[1].split(/[\s,]+/).map(Number);
+      if (parts.length >= 4 && parts[2] > 0 && parts[3] > 0) {
+        width = Math.ceil(parts[2]);
+        height = Math.ceil(parts[3]);
+      }
+    } else {
+      const wMatch = rawSvg.match(/width=["']([0-9.]+)(px)?["']/i);
+      const hMatch = rawSvg.match(/height=["']([0-9.]+)(px)?["']/i);
+      if (wMatch && hMatch) {
+        width = Math.ceil(parseFloat(wMatch[1]));
+        height = Math.ceil(parseFloat(hMatch[1]));
+      }
+    }
+
+    // 2. Ensure root SVG has explicit numeric width, height, and viewBox
+    let fixedSvg = rawSvg;
+    if (/width=["'][^"']*["']/i.test(fixedSvg)) {
+      fixedSvg = fixedSvg.replace(/width=["'][^"']*["']/i, `width="${width}"`);
+    } else {
+      fixedSvg = fixedSvg.replace(/<svg\b/i, `<svg width="${width}"`);
+    }
+
+    if (/height=["'][^"']*["']/i.test(fixedSvg)) {
+      fixedSvg = fixedSvg.replace(/height=["'][^"']*["']/i, `height="${height}"`);
+    } else {
+      fixedSvg = fixedSvg.replace(/<svg\b/i, `<svg height="${height}"`);
+    }
+
+    // 3. Inject crisp rendering attributes
+    fixedSvg = fixedSvg.replace(
+      /<svg\b([^>]*)>/i,
+      (match, attrs) => `<svg ${attrs} shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="crisp-edges">`
+    );
+
+    return { svg: fixedSvg, width, height };
+  }
+
   async function updatePreview() {
     if (!code || !code.trim()) return;
     isGeneratingPreview = true;
     try {
       const id = `export-preview-${Math.random().toString(36).substring(2, 8)}`;
-      const { svg } = await mermaid.render(id, code);
+      const { svg: rawSvg } = await mermaid.render(id, code);
 
-      // Clean up temporary DOM element created by Mermaid
+      // Clean up DOM temp element created by Mermaid
       const tempEl = document.getElementById(id) || document.getElementById(`d${id}`);
       if (tempEl) tempEl.remove();
 
-      let cleanSvg = svg;
-      if (cleanSvg) {
-        cleanSvg = cleanSvg.replace(
-          /<svg\b([^>]*)>/i,
-          (match, attrs) => `<svg ${attrs} shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="crisp-edges">`
-        );
-      }
-      previewSvg = cleanSvg;
-
-      // Extract width and height from SVG attributes or viewBox
-      const viewBoxMatch = cleanSvg.match(/viewBox=["']([^"']+)["']/i);
-      const widthMatch = cleanSvg.match(/width=["']([^"']+)["']/i);
-      const heightMatch = cleanSvg.match(/height=["']([^"']+)["']/i);
-
-      if (viewBoxMatch) {
-        const parts = viewBoxMatch[1].split(/[\s,]+/).map(Number);
-        if (parts.length >= 4 && parts[2] > 0 && parts[3] > 0) {
-          previewWidth = Math.round(parts[2]);
-          previewHeight = Math.round(parts[3]);
-        }
-      } else if (widthMatch && heightMatch) {
-        const w = parseFloat(widthMatch[1]);
-        const h = parseFloat(heightMatch[1]);
-        if (!isNaN(w) && !isNaN(h)) {
-          previewWidth = Math.round(w);
-          previewHeight = Math.round(h);
-        }
-      }
+      const { svg: fixedSvg, width, height } = processSvg(rawSvg);
+      previewSvg = fixedSvg;
+      diagramBaseWidth = width;
+      diagramBaseHeight = height;
+      resetPreviewZoom();
     } catch (err) {
       console.error('Export preview render error:', err);
     } finally {
@@ -145,12 +170,13 @@
     }
   }
 
-  async function generateSvgMarkup(): Promise<string> {
+  async function generateSvgMarkup(): Promise<{ svg: string; width: number; height: number }> {
     const id = `advanced-export-${Math.random().toString(36).substring(2, 8)}`;
-    const { svg } = await mermaid.render(id, code);
+    const { svg: rawSvg } = await mermaid.render(id, code);
     const tempEl = document.getElementById(id) || document.getElementById(`d${id}`);
     if (tempEl) tempEl.remove();
-    return svg;
+
+    return processSvg(rawSvg);
   }
 
   async function handleDownload() {
@@ -167,7 +193,7 @@
         const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
         triggerBlobDownload(blob, `${safeTitle}.md`);
       } else if (selectedFormat === 'SVG') {
-        const rawSvg = await generateSvgMarkup();
+        const { svg: rawSvg } = await generateSvgMarkup();
         const bg = getCanvasBgColor();
         let finalSvg = rawSvg;
 
@@ -183,20 +209,18 @@
         triggerBlobDownload(blob, `${safeTitle}.svg`);
       } else {
         // PNG, JPEG, PDF raster canvas rendering
-        const rawSvg = await generateSvgMarkup();
-        const svgBlob = new Blob([rawSvg], { type: 'image/svg+xml;charset=utf-8' });
+        const { svg: cleanSvg, width: baseW, height: baseH } = await generateSvgMarkup();
+        const svgBlob = new Blob([cleanSvg], { type: 'image/svg+xml;charset=utf-8' });
         const svgUrl = URL.createObjectURL(svgBlob);
 
         const img = new Image();
         img.onload = () => {
-          const baseW = img.width || previewWidth || 1200;
-          const baseH = img.height || previewHeight || 800;
           const pad = selectedPadding;
           const scale = selectedScale;
 
           const canvas = document.createElement('canvas');
-          canvas.width = (baseW + pad * 2) * scale;
-          canvas.height = (baseH + pad * 2) * scale;
+          canvas.width = Math.ceil((baseW + pad * 2) * scale);
+          canvas.height = Math.ceil((baseH + pad * 2) * scale);
 
           const ctx = canvas.getContext('2d');
           if (ctx) {
@@ -280,7 +304,7 @@
 
   async function copySvgMarkup() {
     try {
-      const rawSvg = await generateSvgMarkup();
+      const { svg: rawSvg } = await generateSvgMarkup();
       await navigator.clipboard.writeText(rawSvg);
       copySvgSuccess = true;
       setTimeout(() => (copySvgSuccess = false), 2000);
@@ -292,20 +316,18 @@
   async function copyImageToClipboard() {
     if (!code || !code.trim()) return;
     try {
-      const rawSvg = await generateSvgMarkup();
-      const svgBlob = new Blob([rawSvg], { type: 'image/svg+xml;charset=utf-8' });
+      const { svg: cleanSvg, width: baseW, height: baseH } = await generateSvgMarkup();
+      const svgBlob = new Blob([cleanSvg], { type: 'image/svg+xml;charset=utf-8' });
       const svgUrl = URL.createObjectURL(svgBlob);
 
       const img = new Image();
       img.onload = () => {
-        const baseW = img.width || previewWidth || 1200;
-        const baseH = img.height || previewHeight || 800;
         const pad = selectedPadding;
         const scale = selectedScale;
 
         const canvas = document.createElement('canvas');
-        canvas.width = (baseW + pad * 2) * scale;
-        canvas.height = (baseH + pad * 2) * scale;
+        canvas.width = Math.ceil((baseW + pad * 2) * scale);
+        canvas.height = Math.ceil((baseH + pad * 2) * scale);
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
@@ -383,7 +405,7 @@
               <span>Live Export Preview</span>
             </span>
             <span class="text-[10.5px] text-white/50 font-['IBM_Plex_Mono',monospace]">
-              {(previewWidth + selectedPadding * 2) * selectedScale} x {(previewHeight + selectedPadding * 2) * selectedScale} px (@{selectedScale}x)
+              {Math.ceil((diagramBaseWidth + selectedPadding * 2) * selectedScale)} x {Math.ceil((diagramBaseHeight + selectedPadding * 2) * selectedScale)} px (@{selectedScale}x)
             </span>
           </div>
 
@@ -419,7 +441,7 @@
                   <span>Rendering preview...</span>
                 </div>
               {:else if previewSvg}
-                <div class="w-full h-full flex items-center justify-center [&_svg]:max-h-[240px] [&_svg]:w-auto [&_svg]:h-auto">
+                <div class="w-full h-full flex items-center justify-center p-2 [&_svg]:max-w-[280px] [&_svg]:max-h-[240px] [&_svg]:w-auto [&_svg]:h-auto [&_svg]:block">
                   {@html previewSvg}
                 </div>
               {:else}
