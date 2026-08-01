@@ -445,16 +445,17 @@
               </div>
             </div>
 
-            <select
-              value={targetItem.publicAccessRole || 'viewer'}
-              onchange={(e) => handlePublicRoleChange(e.currentTarget.value as any)}
-              disabled={isSaving}
-              class="rounded-xl border border-white/20 bg-[#161824] px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-amber-400 cursor-pointer"
-            >
-              <option value="viewer">👁️ Viewer (Read-only)</option>
-              <option value="commenter">💬 Commenter (View & Comment)</option>
-              <option value="editor">✏️ Editor (Can Edit)</option>
-            </select>
+            <div class="w-48">
+              <CustomSelect
+                value={targetItem.publicAccessRole || 'viewer'}
+                options={[
+                  { value: 'viewer', label: 'Viewer (Read-only)' },
+                  { value: 'commenter', label: 'Commenter (View & Comment)' },
+                  { value: 'editor', label: 'Editor (Can Edit)' }
+                ]}
+                onChange={(val) => handlePublicRoleChange(val as any)}
+              />
+            </div>
           </div>
         {/if}
 

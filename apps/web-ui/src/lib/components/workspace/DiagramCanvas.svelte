@@ -231,6 +231,18 @@
     }
   }
 
+  interface PathCommand {
+    cmd: string;
+    args: number[];
+  }
+
+  interface ConnectedEdge {
+    pathEl: SVGPathElement;
+    isStart: boolean;
+    isEnd: boolean;
+    initialCommands: PathCommand[];
+  }
+
   // Manual Node Dragging State (when Auto-Layout is untoggled)
   let isDraggingNode = $state(false);
   let activeDraggedNode: SVGGElement | null = null;
@@ -239,6 +251,26 @@
   let initialNodeX = 0;
   let initialNodeY = 0;
   let customNodePositions = $state<Record<string, { x: number; y: number }>>({});
+  let activeConnectedEdges: ConnectedEdge[] = [];
+
+  function parseSvgPathD(d: string): PathCommand[] {
+    const commands: PathCommand[] = [];
+    const regex = /([a-zA-Z])([^a-zA-Z]*)/g;
+    let match;
+    while ((match = regex.exec(d)) !== null) {
+      const cmd = match[1];
+      const argsStr = match[2].trim();
+      const args = argsStr ? argsStr.split(/[\s,]+/).map(Number).filter((n) => !isNaN(n)) : [];
+      commands.push({ cmd, args });
+    }
+    return commands;
+  }
+
+  function serializeSvgPathD(commands: PathCommand[]): string {
+    return commands
+      .map((c) => `${c.cmd} ${c.args.join(' ')}`)
+      .join(' ');
+  }
 
   function attachNodeDragListeners() {
     if (!canvasContainer) return;
@@ -283,6 +315,52 @@
         dragStartX = e.clientX;
         dragStartY = e.clientY;
 
+        // Discover connected edge paths for this node
+        activeConnectedEdges = [];
+        const nodeId = gNode.id || gNode.getAttribute('id') || '';
+        const rawNodeId = nodeId.replace(/^flowchart-/, '').replace(/-\d+$/, '');
+
+        const nodeBbox = (gNode as any).getBBox ? (gNode as any).getBBox() : null;
+        const nodeCenterX = initialNodeX + (nodeBbox ? nodeBbox.x + nodeBbox.width / 2 : 0);
+        const nodeCenterY = initialNodeY + (nodeBbox ? nodeBbox.y + nodeBbox.height / 2 : 0);
+
+        const allPaths = svgEl.querySelectorAll('path');
+        allPaths.forEach((pathEl) => {
+          const dAttr = pathEl.getAttribute('d');
+          if (!dAttr) return;
+
+          const pathClass = pathEl.getAttribute('class') || '';
+          const pathId = pathEl.getAttribute('id') || '';
+          const parsed = parseSvgPathD(dAttr);
+          if (parsed.length === 0) return;
+
+          const startPt = { x: parsed[0].args[0] || 0, y: parsed[0].args[1] || 0 };
+          const lastCmd = parsed[parsed.length - 1];
+          const lastLen = lastCmd.args.length;
+          const endPt = {
+            x: lastLen >= 2 ? lastCmd.args[lastLen - 2] : 0,
+            y: lastLen >= 2 ? lastCmd.args[lastLen - 1] : 0
+          };
+
+          const isStartClass = (nodeId && pathClass.includes(`LS-${nodeId}`)) || (rawNodeId && pathClass.includes(`LS-${rawNodeId}`)) || (nodeId && pathId.startsWith(`L-${nodeId}`)) || (rawNodeId && pathId.startsWith(`L-${rawNodeId}`));
+          const isEndClass = (nodeId && pathClass.includes(`LE-${nodeId}`)) || (rawNodeId && pathClass.includes(`LE-${rawNodeId}`)) || (nodeId && pathId.includes(`-${nodeId}`)) || (rawNodeId && pathId.includes(`-${rawNodeId}`));
+
+          const isStartProx = Math.hypot(startPt.x - nodeCenterX, startPt.y - nodeCenterY) < 120;
+          const isEndProx = Math.hypot(endPt.x - nodeCenterX, endPt.y - nodeCenterY) < 120;
+
+          const isStart = Boolean(isStartClass || isStartProx);
+          const isEnd = Boolean(isEndClass || isEndProx);
+
+          if (isStart || isEnd) {
+            activeConnectedEdges.push({
+              pathEl: pathEl as SVGPathElement,
+              isStart,
+              isEnd,
+              initialCommands: parsed
+            });
+          }
+        });
+
         window.addEventListener('mousemove', handleNodeDragMove);
         window.addEventListener('mouseup', handleNodeDragEnd);
       };
@@ -304,6 +382,37 @@
     if (nodeId) {
       customNodePositions[nodeId] = { x: newX, y: newY };
     }
+
+    // Update connected edge path endpoints so arrows follow the node!
+    activeConnectedEdges.forEach((edge) => {
+      const updatedCmds = JSON.parse(JSON.stringify(edge.initialCommands)) as PathCommand[];
+
+      if (edge.isStart && updatedCmds[0]?.args && updatedCmds[0].args.length >= 2) {
+        updatedCmds[0].args[0] += dx;
+        updatedCmds[0].args[1] += dy;
+
+        if (updatedCmds[1] && (updatedCmds[1].cmd === 'C' || updatedCmds[1].cmd === 'Q') && updatedCmds[1].args.length >= 2) {
+          updatedCmds[1].args[0] += dx;
+          updatedCmds[1].args[1] += dy;
+        }
+      }
+
+      if (edge.isEnd && updatedCmds.length > 0) {
+        const lastCmd = updatedCmds[updatedCmds.length - 1];
+        const n = lastCmd.args.length;
+        if (n >= 2) {
+          lastCmd.args[n - 2] += dx;
+          lastCmd.args[n - 1] += dy;
+
+          if (lastCmd.cmd === 'C' && n >= 4) {
+            lastCmd.args[n - 4] += dx;
+            lastCmd.args[n - 3] += dy;
+          }
+        }
+      }
+
+      edge.pathEl.setAttribute('d', serializeSvgPathD(updatedCmds));
+    });
   }
 
   function handleNodeDragEnd() {
@@ -312,6 +421,7 @@
       activeDraggedNode = null;
     }
     isDraggingNode = false;
+    activeConnectedEdges = [];
     window.removeEventListener('mousemove', handleNodeDragMove);
     window.removeEventListener('mouseup', handleNodeDragEnd);
   }
