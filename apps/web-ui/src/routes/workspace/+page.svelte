@@ -964,10 +964,14 @@
     URL.revokeObjectURL(url);
   }
 
-  async function handleCreateDiagram(title = 'Untitled Diagram', folderId: string | null = null) {
+  async function handleCreateDiagram(
+    title = 'Untitled Diagram',
+    folderId: string | null = null,
+    customCode?: string
+  ) {
     const userId = data.session?.user?.id || 'guest-user';
     const diagramId = crypto.randomUUID();
-    const initialCode = `graph TD\n  Start[Start Process] --> Process[Execute Task]\n  Process --> End[Finish]`;
+    const initialCode = customCode || `graph TD\n  Start[Start Process] --> Process[Execute Task]\n  Process --> End[Finish]`;
 
     const newDiagram = {
       id: diagramId,
@@ -1268,7 +1272,13 @@
 <AIAssistantModal
   bind:isOpen={aiModalOpen}
   currentCode={workspaceStore.activeCode}
-  onApply={(newCode: string) => handleCodeChange(newCode)}
+  onApply={async (newCode: string, mode: 'create' | 'refine', promptTitle?: string) => {
+    if (mode === 'create' || !workspaceStore.activeDiagramId) {
+      await handleCreateDiagram(promptTitle || 'AI Diagram', workspaceStore.activeFolderId, newCode);
+    } else {
+      await handleCodeChange(newCode);
+    }
+  }}
   onOpenSettings={() => (settingsModalOpen = true)}
 />
 
