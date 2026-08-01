@@ -221,6 +221,7 @@
       svgContent = cleanSvg;
       if (canvasContainer) {
         canvasContainer.innerHTML = cleanSvg;
+        attachNodeDragListeners();
       }
     } catch (err: any) {
       console.warn('Mermaid render warning:', err);
@@ -228,6 +229,91 @@
     } finally {
       isRendering = false;
     }
+  }
+
+  // Manual Node Dragging State (when Auto-Layout is untoggled)
+  let isDraggingNode = $state(false);
+  let activeDraggedNode: SVGGElement | null = null;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let initialNodeX = 0;
+  let initialNodeY = 0;
+  let customNodePositions = $state<Record<string, { x: number; y: number }>>({});
+
+  function attachNodeDragListeners() {
+    if (!canvasContainer) return;
+    const svgEl = canvasContainer.querySelector('svg');
+    if (!svgEl) return;
+
+    // Target all node groups in Mermaid SVG
+    const nodes = svgEl.querySelectorAll('g.node, g.cluster, g[id*="flowchart-"], g.actor, g.classGroup');
+
+    nodes.forEach((nodeEl) => {
+      const gNode = nodeEl as SVGGElement;
+      gNode.style.cursor = !isAutoLayoutEnabled ? 'grab' : 'default';
+
+      // Restore custom position if saved and auto-layout is disabled
+      const nodeId = gNode.id || gNode.getAttribute('id') || '';
+      if (!isAutoLayoutEnabled && nodeId && customNodePositions[nodeId]) {
+        const pos = customNodePositions[nodeId];
+        gNode.setAttribute('transform', `translate(${pos.x}, ${pos.y})`);
+      }
+
+      gNode.onmousedown = (e: MouseEvent) => {
+        if (isAutoLayoutEnabled) return;
+        if (e.button !== 0) return; // Only main click
+
+        e.stopPropagation();
+        e.preventDefault();
+
+        activeDraggedNode = gNode;
+        isDraggingNode = true;
+        gNode.style.cursor = 'grabbing';
+
+        const transformAttr = gNode.getAttribute('transform') || '';
+        const match = transformAttr.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/);
+        if (match) {
+          initialNodeX = parseFloat(match[1]);
+          initialNodeY = parseFloat(match[2]);
+        } else {
+          initialNodeX = 0;
+          initialNodeY = 0;
+        }
+
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+
+        window.addEventListener('mousemove', handleNodeDragMove);
+        window.addEventListener('mouseup', handleNodeDragEnd);
+      };
+    });
+  }
+
+  function handleNodeDragMove(e: MouseEvent) {
+    if (!isDraggingNode || !activeDraggedNode) return;
+
+    const dx = (e.clientX - dragStartX) / zoomScale;
+    const dy = (e.clientY - dragStartY) / zoomScale;
+
+    const newX = Math.round(initialNodeX + dx);
+    const newY = Math.round(initialNodeY + dy);
+
+    activeDraggedNode.setAttribute('transform', `translate(${newX}, ${newY})`);
+
+    const nodeId = activeDraggedNode.id || activeDraggedNode.getAttribute('id') || '';
+    if (nodeId) {
+      customNodePositions[nodeId] = { x: newX, y: newY };
+    }
+  }
+
+  function handleNodeDragEnd() {
+    if (activeDraggedNode) {
+      activeDraggedNode.style.cursor = 'grab';
+      activeDraggedNode = null;
+    }
+    isDraggingNode = false;
+    window.removeEventListener('mousemove', handleNodeDragMove);
+    window.removeEventListener('mouseup', handleNodeDragEnd);
   }
 
   function handleInput(e: Event) {
@@ -340,6 +426,10 @@
 
   function toggleAutoLayout() {
     isAutoLayoutEnabled = !isAutoLayoutEnabled;
+    if (isAutoLayoutEnabled) {
+      customNodePositions = {};
+    }
+    renderDiagram();
   }
 
   function toggleToolbarPopover(popover: 'none' | 'theme' | 'direction' | 'layout') {
@@ -716,6 +806,20 @@
             </button>
           </div>
         </div>
+      </div>
+    {/if}
+
+    <!-- Manual Node Dragging Active Banner -->
+    {#if !isAutoLayoutEnabled}
+      <div class="absolute top-6 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-2xl bg-[#12141F]/90 border border-amber-500/30 text-amber-300 text-xs font-semibold font-['IBM_Plex_Mono',monospace] shadow-2xl backdrop-blur-xl flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 duration-150">
+        <Hand size={15} class="text-amber-400 shrink-0" />
+        <span>Manual Dragging Active &bull; Click & drag any node on the canvas</span>
+        <button
+          onclick={() => toggleAutoLayout()}
+          class="ml-1 px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-[10px] font-bold text-amber-200 border border-amber-500/30 transition-colors cursor-pointer"
+        >
+          Reset Auto-Layout
+        </button>
       </div>
     {/if}
 
