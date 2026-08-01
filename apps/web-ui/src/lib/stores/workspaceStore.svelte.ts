@@ -9,6 +9,7 @@ export interface Folder {
   isShared?: boolean;
   shareToken?: string | null;
   shareUpdatedAt?: string | null;
+  publicAccessRole?: 'editor' | 'commenter' | 'viewer';
   sharedCollaboratorCount?: number;
   isDeleted: boolean;
   deletedAt?: string | null;
@@ -27,6 +28,7 @@ export interface Diagram {
   isShared: boolean;
   shareToken?: string | null;
   shareUpdatedAt?: string | null;
+  publicAccessRole?: 'editor' | 'commenter' | 'viewer';
   isDeleted: boolean;
   deletedAt?: string | null;
   createdAt: string;

@@ -10,7 +10,7 @@
   import TemplatesModal from '$lib/components/workspace/TemplatesModal.svelte';
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { presenceStore } from '$lib/stores/presenceStore.svelte';
-  import { Folder, FileText, ArrowRight, ExternalLink, ShieldCheck } from 'lucide-svelte';
+  import { Folder, FileText, ArrowRight, ExternalLink, ShieldCheck, Lock, Edit3, MessageSquare, Eye } from 'lucide-svelte';
 
   let { data }: { data: PageData } = $props();
   const supabase = createSupabaseBrowserClient();
@@ -42,7 +42,7 @@
         email: data.userEmail || 'Guest Viewer',
         fullName: fullName,
         avatarUrl: userMeta.avatar_url,
-        role: data.userRole || 'viewer'
+        role: data.userRole === 'editor' ? 'editor' : 'viewer'
       });
     }
 
@@ -105,12 +105,22 @@
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-base font-bold text-white tracking-tight">{data.folder.name}</h1>
-            <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30 font-['IBM_Plex_Mono',monospace]">
-              <ShieldCheck size={11} /> Publicly Shared Folder
-            </span>
+            {#if data.userRole === 'editor'}
+              <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30 font-['IBM_Plex_Mono',monospace]">
+                <Edit3 size={11} /> Public Editor Access
+              </span>
+            {:else if data.userRole === 'commenter'}
+              <span class="inline-flex items-center gap-1 rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] font-bold text-sky-300 border border-sky-500/30 font-['IBM_Plex_Mono',monospace]">
+                <MessageSquare size={11} /> Public Commenter Access
+              </span>
+            {:else}
+              <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/30 font-['IBM_Plex_Mono',monospace]">
+                <Eye size={11} /> Public Read-Only Folder
+              </span>
+            {/if}
           </div>
           <p class="text-xs text-white/40 font-['IBM_Plex_Mono',monospace] mt-0.5">
-            {data.diagrams.length} {data.diagrams.length === 1 ? 'diagram' : 'diagrams'} inside
+            {(data.subFolders?.length || 0)} sub-folders &bull; {data.diagrams.length} {data.diagrams.length === 1 ? 'diagram' : 'diagrams'}
           </p>
         </div>
       </div>
@@ -135,46 +145,78 @@
     </header>
 
     <!-- Folder Contents Grid -->
-    <main class="flex-1 max-w-6xl w-full mx-auto p-6 md:p-10">
-      <div class="mb-6">
-        <h2 class="text-xs font-bold uppercase text-white/40 tracking-wider font-['IBM_Plex_Mono',monospace]">
-          Shared Diagrams
-        </h2>
-      </div>
-
-      {#if data.diagrams.length === 0}
-        <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-12 text-center">
-          <FileText class="w-10 h-10 text-white/20 mx-auto mb-3" />
-          <h3 class="text-sm font-semibold text-white">No public diagrams in this folder</h3>
-          <p class="text-xs text-white/40 mt-1">Diagrams added to this folder will automatically appear here.</p>
-        </div>
-      {:else}
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {#each data.diagrams as diagram (diagram.id)}
-            <a
-              href={`/share/${diagram.shareToken}`}
-              class="group relative rounded-2xl border border-white/10 bg-[#12141D] hover:bg-[#181B27] hover:border-amber-500/40 p-5 transition-all flex flex-col justify-between h-44 shadow-lg cursor-pointer"
-            >
-              <div>
-                <div class="flex items-center justify-between mb-3">
-                  <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
-                    <FileText size={16} />
+    <main class="flex-1 max-w-6xl w-full mx-auto p-6 md:p-10 space-y-8">
+      <!-- Sub-Folders Section (if any exist) -->
+      {#if data.subFolders && data.subFolders.length > 0}
+        <div>
+          <div class="mb-3 flex items-center justify-between">
+            <h2 class="text-xs font-bold uppercase text-white/40 tracking-wider font-['IBM_Plex_Mono',monospace]">
+              Sub-Folders ({data.subFolders.length})
+            </h2>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {#each data.subFolders as subFolder (subFolder.id)}
+              <a
+                href={`/share/${subFolder.shareToken || subFolder.id}`}
+                class="group flex items-center justify-between rounded-xl border border-white/10 bg-[#12141D] hover:bg-[#181B27] hover:border-amber-500/40 p-3.5 transition-all shadow-md cursor-pointer"
+              >
+                <div class="flex items-center gap-3 truncate">
+                  <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
+                    <Folder size={16} />
                   </div>
-                  <ExternalLink size={14} class="text-white/30 group-hover:text-amber-400 transition-colors" />
+                  <span class="font-bold text-xs text-white group-hover:text-amber-400 transition-colors truncate">
+                    {subFolder.name}
+                  </span>
                 </div>
-                <h3 class="font-bold text-sm text-white group-hover:text-amber-400 transition-colors line-clamp-2">
-                  {diagram.title}
-                </h3>
-              </div>
-
-              <div class="flex items-center justify-between pt-3 border-t border-white/5 text-[11px] text-white/40 font-['IBM_Plex_Mono',monospace]">
-                <span>View Diagram</span>
-                <ArrowRight size={12} class="group-hover:translate-x-1 transition-transform text-amber-400" />
-              </div>
-            </a>
-          {/each}
+                <ArrowRight size={14} class="text-white/30 group-hover:text-amber-400 group-hover:translate-x-1 transition-all shrink-0" />
+              </a>
+            {/each}
+          </div>
         </div>
       {/if}
+
+      <!-- Diagrams Section -->
+      <div>
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-xs font-bold uppercase text-white/40 tracking-wider font-['IBM_Plex_Mono',monospace]">
+            Shared Diagrams ({data.diagrams.length})
+          </h2>
+        </div>
+
+        {#if data.diagrams.length === 0 && (!data.subFolders || data.subFolders.length === 0)}
+          <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-12 text-center">
+            <FileText class="w-10 h-10 text-white/20 mx-auto mb-3" />
+            <h3 class="text-sm font-semibold text-white">No diagrams or sub-folders in this folder</h3>
+            <p class="text-xs text-white/40 mt-1">Diagrams added to this folder will automatically appear here.</p>
+          </div>
+        {:else}
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {#each data.diagrams as diagram (diagram.id)}
+              <a
+                href={`/share/${diagram.shareToken || diagram.id}`}
+                class="group relative rounded-2xl border border-white/10 bg-[#12141D] hover:bg-[#181B27] hover:border-amber-500/40 p-5 transition-all flex flex-col justify-between h-44 shadow-lg cursor-pointer"
+              >
+                <div>
+                  <div class="flex items-center justify-between mb-3">
+                    <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                      <FileText size={16} />
+                    </div>
+                    <ExternalLink size={14} class="text-white/30 group-hover:text-amber-400 transition-colors" />
+                  </div>
+                  <h3 class="font-bold text-sm text-white group-hover:text-amber-400 transition-colors line-clamp-2">
+                    {diagram.title}
+                  </h3>
+                </div>
+
+                <div class="flex items-center justify-between pt-3 border-t border-white/5 text-[11px] text-white/40 font-['IBM_Plex_Mono',monospace]">
+                  <span>Open Diagram</span>
+                  <ArrowRight size={12} class="group-hover:translate-x-1 transition-transform text-amber-400" />
+                </div>
+              </a>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </main>
   </div>
 {:else}

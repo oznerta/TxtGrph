@@ -2,7 +2,7 @@
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { workspaceStore } from '$lib/stores/workspaceStore.svelte';
   import type { Diagram, Folder } from '@txtgrph/core';
-  import { Share2, Copy, Check, RefreshCw, X, Link2, ShieldAlert, UserPlus, Users, Mail, Trash2, Folder as FolderIcon, Info } from 'lucide-svelte';
+  import { Share2, Copy, Check, RefreshCw, X, Link2, ShieldAlert, UserPlus, Users, Mail, Trash2, Folder as FolderIcon, Info, Globe } from 'lucide-svelte';
   import CustomSelect, { type SelectOption } from '$lib/components/ui/CustomSelect.svelte';
 
   interface Props {
@@ -124,6 +124,43 @@
     } catch (err: any) {
       console.error('Failed to toggle share state:', err);
       errorMessage = err?.message || 'Failed to update share settings';
+    } finally {
+      isSaving = false;
+    }
+  }
+
+  async function handlePublicRoleChange(newRole: 'editor' | 'commenter' | 'viewer') {
+    if (!targetItem) return;
+    isSaving = true;
+    errorMessage = null;
+
+    try {
+      if (folder) {
+        const { error } = await supabase
+          .from('folders')
+          .update({
+            public_access_role: newRole,
+            share_updated_at: new Date().toISOString()
+          })
+          .eq('id', folder.id);
+
+        if (error) throw error;
+        folder.publicAccessRole = newRole;
+      } else if (diagram) {
+        const { error } = await supabase
+          .from('diagrams')
+          .update({
+            public_access_role: newRole,
+            share_updated_at: new Date().toISOString()
+          })
+          .eq('id', diagram.id);
+
+        if (error) throw error;
+        diagram.publicAccessRole = newRole;
+      }
+    } catch (err: any) {
+      console.error('Failed to update public access role:', err);
+      errorMessage = err?.message || 'Failed to update access role';
     } finally {
       isSaving = false;
     }
@@ -396,6 +433,30 @@
             ></span>
           </button>
         </div>
+
+        <!-- Google Drive Style General Access Permission Dropdown -->
+        {#if targetItem?.isShared}
+          <div class="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] p-3.5 animate-in fade-in duration-150">
+            <div class="flex items-center gap-2.5">
+              <Globe size={16} class="text-emerald-400 shrink-0" />
+              <div>
+                <div class="text-xs font-semibold text-white">General Access Role</div>
+                <div class="text-[11px] text-white/40">Permission level for anyone with the public link</div>
+              </div>
+            </div>
+
+            <select
+              value={targetItem.publicAccessRole || 'viewer'}
+              onchange={(e) => handlePublicRoleChange(e.currentTarget.value as any)}
+              disabled={isSaving}
+              class="rounded-xl border border-white/20 bg-[#161824] px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-amber-400 cursor-pointer"
+            >
+              <option value="viewer">👁️ Viewer (Read-only)</option>
+              <option value="commenter">💬 Commenter (View & Comment)</option>
+              <option value="editor">✏️ Editor (Can Edit)</option>
+            </select>
+          </div>
+        {/if}
 
         <!-- Share URL Field (when enabled) -->
         {#if targetItem?.isShared}

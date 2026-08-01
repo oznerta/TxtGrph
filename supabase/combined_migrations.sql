@@ -638,13 +638,69 @@ BEGIN
     ALTER TABLE public.folders ADD COLUMN share_token UUID DEFAULT gen_random_uuid();
     ALTER TABLE public.folders ADD COLUMN share_updated_at TIMESTAMPTZ DEFAULT now();
   END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' AND table_name = 'folders' AND column_name = 'public_access_role'
+  ) THEN
+    ALTER TABLE public.folders ADD COLUMN public_access_role TEXT NOT NULL DEFAULT 'viewer';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' AND table_name = 'diagrams' AND column_name = 'public_access_role'
+  ) THEN
+    ALTER TABLE public.diagrams ADD COLUMN public_access_role TEXT NOT NULL DEFAULT 'viewer';
+  END IF;
 END $$;
 
+-- Recursive helper function to check if a folder is inside any publicly shared parent folder tree
+CREATE OR REPLACE FUNCTION public.is_folder_in_public_shared_tree(p_folder_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  IF p_folder_id IS NULL THEN
+    RETURN false;
+  END IF;
+
+  RETURN EXISTS (
+    WITH RECURSIVE parent_chain AS (
+      SELECT id, parent_id, is_shared, is_deleted
+      FROM public.folders
+      WHERE id = p_folder_id AND is_deleted = false
+
+      UNION ALL
+
+      SELECT parent.id, parent.parent_id, parent.is_shared, parent.is_deleted
+      FROM public.folders parent
+      JOIN parent_chain child ON child.parent_id = parent.id
+      WHERE parent.is_deleted = false
+    )
+    SELECT 1 FROM parent_chain WHERE is_shared = true
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Updated Public RLS Policies for Folders and Diagrams
 DROP POLICY IF EXISTS "Public can view shared active folders" ON public.folders;
 CREATE POLICY "Public can view shared active folders"
   ON public.folders FOR SELECT
   USING (
     is_deleted = false 
-    AND is_shared = true 
-    AND share_token IS NOT NULL
+    AND (
+      (is_shared = true AND share_token IS NOT NULL)
+      OR
+      public.is_folder_in_public_shared_tree(parent_id)
+    )
+  );
+
+DROP POLICY IF EXISTS "Public can view shared active diagrams" ON public.diagrams;
+CREATE POLICY "Public can view shared active diagrams"
+  ON public.diagrams FOR SELECT
+  USING (
+    is_deleted = false 
+    AND (
+      (is_shared = true AND share_token IS NOT NULL)
+      OR
+      public.is_folder_in_public_shared_tree(folder_id)
+    )
   );
