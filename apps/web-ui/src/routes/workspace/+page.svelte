@@ -88,10 +88,30 @@
   let commentsModalOpen = $state(false);
   let multiMoveModalOpen = $state(false);
   let multiMoveModalIds = $state<string[]>([]);
-  let renameModalOpen = $state(false);
-  let renameTargetType = $state<'folder' | 'diagram'>('diagram');
-  let renameTargetId = $state<string | null>(null);
-  let renameTargetName = $state('');
+  let nameModalOpen = $state(false);
+  let nameModalMode = $state<'rename' | 'create'>('rename');
+  let nameModalType = $state<'folder' | 'diagram'>('diagram');
+  let nameModalId = $state<string | null>(null);
+  let nameModalInitial = $state('');
+  let nameModalParentFolderId = $state<string | null>(null);
+
+  function openCreateModal(type: 'folder' | 'diagram', parentOrFolderId: string | null = null) {
+    nameModalMode = 'create';
+    nameModalType = type;
+    nameModalId = null;
+    nameModalInitial = type === 'folder' ? 'New Folder' : 'Untitled Diagram';
+    nameModalParentFolderId = parentOrFolderId;
+    nameModalOpen = true;
+  }
+
+  function openRenameModal(type: 'folder' | 'diagram', id: string, currentName: string) {
+    nameModalMode = 'rename';
+    nameModalType = type;
+    nameModalId = id;
+    nameModalInitial = currentName;
+    nameModalParentFolderId = null;
+    nameModalOpen = true;
+  }
   let activeOrgSettingsId = $state<string | null>(null);
   let activeOrgSettingsName = $state('Team Space');
   let organizations = $state<{ id: string; name: string; slug?: string; ownerId?: string }[]>([]);
@@ -1147,12 +1167,6 @@
       .eq('id', id);
   }
 
-  function openRenameModal(type: 'folder' | 'diagram', id: string, currentName: string) {
-    renameTargetType = type;
-    renameTargetId = id;
-    renameTargetName = currentName;
-    renameModalOpen = true;
-  }
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -1170,8 +1184,8 @@
         {favoriteIds}
         {organizations}
         onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
-        onCreateFolder={handleCreateFolder}
-        onCreateDiagram={handleCreateDiagram}
+        onCreateFolder={(parentId?: string | null) => openCreateModal('folder', parentId || null)}
+        onCreateDiagram={(folderId?: string | null) => openCreateModal('diagram', folderId || null)}
         onRenameFolder={(id, currentName) => openRenameModal('folder', id, currentName)}
         onRenameDiagram={(id, currentTitle) => openRenameModal('diagram', id, currentTitle)}
         onDeleteFolder={handleDeleteFolder}
@@ -1244,8 +1258,8 @@
         onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
         onSelectDiagram={(id: string) => { workspaceStore.selectDiagram(id); sidebarOpen = false; }}
         onSelectFolder={(id: string | null) => workspaceStore.selectFolder(id)}
-        onCreateDiagram={(folderId?: string | null) => { handleCreateDiagram('Untitled Diagram', folderId || null); }}
-        onCreateFolder={(parentId?: string | null) => { handleCreateFolder('new folder', parentId || null); }}
+        onCreateDiagram={(folderId?: string | null) => openCreateModal('diagram', folderId || null)}
+        onCreateFolder={(parentId?: string | null) => openCreateModal('folder', parentId || null)}
         onOpenAiModal={() => (aiModalOpen = true)}
         onToggleFavorite={toggleFavorite}
         onShareDiagram={(diagram: Diagram) => {
@@ -1363,17 +1377,26 @@
 />
 
 <RenameModal
-  open={renameModalOpen}
-  itemType={renameTargetType}
-  itemId={renameTargetId}
-  initialName={renameTargetName}
+  open={nameModalOpen}
+  mode={nameModalMode}
+  itemType={nameModalType}
+  itemId={nameModalId}
+  initialName={nameModalInitial}
+  parentOrFolderId={nameModalParentFolderId}
   onrename={(id, newName) => {
-    if (renameTargetType === 'folder') {
+    if (nameModalType === 'folder') {
       handleRenameFolder(id, newName);
     } else {
       handleRenameDiagram(id, newName);
     }
   }}
-  onclose={() => (renameModalOpen = false)}
+  oncreate={(name, type, parentOrFolderId) => {
+    if (type === 'folder') {
+      handleCreateFolder(name, parentOrFolderId || null);
+    } else {
+      handleCreateDiagram(name, parentOrFolderId || null);
+    }
+  }}
+  onclose={() => (nameModalOpen = false)}
 />
 

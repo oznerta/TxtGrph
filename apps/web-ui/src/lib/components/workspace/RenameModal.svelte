@@ -1,21 +1,27 @@
 <script lang="ts">
-  import { Edit3, Folder, FileText, X } from 'lucide-svelte';
+  import { Edit3, Plus, Folder, FileText, X } from 'lucide-svelte';
 
   interface Props {
     open?: boolean;
+    mode?: 'rename' | 'create';
     itemType?: 'folder' | 'diagram';
     itemId?: string | null;
     initialName?: string;
+    parentOrFolderId?: string | null;
     onrename?: (id: string, newName: string) => void;
+    oncreate?: (name: string, itemType: 'folder' | 'diagram', parentOrFolderId?: string | null) => void;
     onclose?: () => void;
   }
 
   let {
     open = false,
+    mode = 'rename',
     itemType = 'diagram',
     itemId = null,
     initialName = '',
+    parentOrFolderId = null,
     onrename = () => {},
+    oncreate = () => {},
     onclose = () => {}
   }: Props = $props();
 
@@ -29,10 +35,14 @@
 
   function handleSubmit() {
     const trimmed = nameValue.trim();
-    if (trimmed && itemId) {
+    if (!trimmed) return;
+
+    if (mode === 'create') {
+      oncreate(trimmed, itemType, parentOrFolderId);
+    } else if (itemId) {
       onrename(itemId, trimmed);
-      onclose();
     }
+    onclose();
   }
 </script>
 
@@ -64,9 +74,11 @@
           </div>
           <div>
             <h3 class="text-base font-bold text-white tracking-tight">
-              Rename {itemType === 'folder' ? 'Folder' : 'Diagram'}
+              {mode === 'create' ? `New ${itemType === 'folder' ? 'Folder' : 'Diagram'}` : `Rename ${itemType === 'folder' ? 'Folder' : 'Diagram'}`}
             </h3>
-            <p class="text-xs text-white/50">Enter a new name for this {itemType}</p>
+            <p class="text-xs text-white/50">
+              {mode === 'create' ? `Enter a name for your new ${itemType}` : `Enter a new name for this ${itemType}`}
+            </p>
           </div>
         </div>
 
@@ -83,15 +95,15 @@
       <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-4">
         <div class="space-y-1.5">
           <label for="rename-input" class="block text-xs font-semibold text-white/70">
-            Name
+            {itemType === 'folder' ? 'Folder Name' : 'Diagram Title'}
           </label>
           <!-- svelte-ignore a11y_autofocus -->
           <input
             id="rename-input"
             type="text"
             bind:value={nameValue}
-            placeholder={itemType === 'folder' ? 'Folder name...' : 'Diagram title...'}
-            class="w-full h-11 px-4 text-sm rounded-xl bg-[#161824] border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/60 transition-all"
+            placeholder={itemType === 'folder' ? 'e.g. Finance & Invoicing' : 'e.g. User Authentication Flow'}
+            class="w-full h-11 px-4 text-sm rounded-xl bg-[#161824] border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/60 transition-all font-['IBM_Plex_Mono',monospace]"
             autofocus
           />
         </div>
@@ -101,7 +113,7 @@
           <button
             type="button"
             onclick={onclose}
-            class="px-4 py-2.5 text-xs font-semibold rounded-xl bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+            class="px-4 py-2.5 text-xs font-semibold rounded-xl bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           >
             Cancel
           </button>
@@ -110,8 +122,13 @@
             disabled={!nameValue.trim()}
             class="px-5 py-2.5 text-xs font-bold rounded-xl bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
           >
-            <Edit3 size={14} />
-            <span>Save Name</span>
+            {#if mode === 'create'}
+              <Plus size={14} />
+              <span>Create {itemType === 'folder' ? 'Folder' : 'Diagram'}</span>
+            {:else}
+              <Edit3 size={14} />
+              <span>Save Name</span>
+            {/if}
           </button>
         </div>
       </form>
