@@ -28,17 +28,32 @@ export const load: PageLoad = async () => {
     .select('*')
     .order('updated_at', { ascending: false });
 
-  const folders: Folder[] = (foldersData || []).map((f) => ({
-    id: f.id,
-    userId: f.user_id,
-    parentId: f.parent_id,
-    organizationId: f.organization_id || null,
-    name: f.name,
-    isDeleted: f.is_deleted || false,
-    deletedAt: f.deleted_at || null,
-    createdAt: f.created_at,
-    updatedAt: f.updated_at
-  }));
+  // Fetch Folder Collaborators
+  const { data: folderCollabsData } = await supabase
+    .from('folder_collaborators')
+    .select('folder_id');
+
+  const folderCollabCounts = new Map<string, number>();
+  (folderCollabsData || []).forEach((fc: any) => {
+    folderCollabCounts.set(fc.folder_id, (folderCollabCounts.get(fc.folder_id) || 0) + 1);
+  });
+
+  const folders: Folder[] = (foldersData || []).map((f) => {
+    const count = folderCollabCounts.get(f.id) || 0;
+    return {
+      id: f.id,
+      userId: f.user_id,
+      parentId: f.parent_id,
+      organizationId: f.organization_id || null,
+      name: f.name,
+      isShared: count > 0,
+      sharedCollaboratorCount: count,
+      isDeleted: f.is_deleted || false,
+      deletedAt: f.deleted_at || null,
+      createdAt: f.created_at,
+      updatedAt: f.updated_at
+    };
+  });
 
   const diagrams: Diagram[] = (diagramsData || []).map((d) => ({
     id: d.id,

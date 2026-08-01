@@ -6,6 +6,8 @@ export interface Folder {
   name: string;
   color?: string | null;
   icon?: string | null;
+  isShared?: boolean;
+  sharedCollaboratorCount?: number;
   isDeleted: boolean;
   deletedAt?: string | null;
   createdAt: string;
@@ -236,6 +238,15 @@ export class WorkspaceStore {
         target.shareToken = shareToken;
       }
       target.shareUpdatedAt = new Date().toISOString();
+    }
+  }
+
+  // Toggle Folder Share state
+  updateFolderShareState(folderId: string, isShared: boolean, count: number = 0) {
+    const target = this.folders.find((f) => f.id === folderId);
+    if (target) {
+      target.isShared = isShared;
+      target.sharedCollaboratorCount = count;
     }
   }
 

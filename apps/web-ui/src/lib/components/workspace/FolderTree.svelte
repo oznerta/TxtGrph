@@ -9,6 +9,7 @@
     Trash2,
     LayoutDashboard,
     User,
+    Users,
     Share2,
     MoreVertical,
     Menu,
@@ -116,17 +117,35 @@
         <FolderIcon size={13} class="shrink-0 text-white/50" />
       {/if}
       <span class="truncate font-medium">{folder.name}</span>
+      {#if folder.isShared}
+        <span class="ml-1 inline-flex items-center gap-0.5 rounded bg-sky-500/20 px-1 py-0.5 text-[9px] font-bold text-sky-300 border border-sky-500/30 shrink-0" title="Shared folder">
+          <Users size={10} />
+        </span>
+      {/if}
     </button>
 
-    <button
-      onclick={(e) => {
-        e.stopPropagation();
-        activeMenuFolderId = activeMenuFolderId === folder.id ? null : folder.id;
-      }}
-      class="p-0.5 rounded text-white/40 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-    >
-      <MoreVertical size={12} />
-    </button>
+    <div class="flex items-center gap-0.5 shrink-0">
+      <button
+        onclick={(e) => {
+          e.stopPropagation();
+          onShareFolder(folder);
+        }}
+        title="Share folder"
+        class="p-0.5 rounded text-white/40 hover:text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity"
+      >
+        <Share2 size={12} />
+      </button>
+
+      <button
+        onclick={(e) => {
+          e.stopPropagation();
+          activeMenuFolderId = activeMenuFolderId === folder.id ? null : folder.id;
+        }}
+        class="p-0.5 rounded text-white/40 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+      >
+        <MoreVertical size={12} />
+      </button>
+    </div>
 
     {#if activeMenuFolderId === folder.id}
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->

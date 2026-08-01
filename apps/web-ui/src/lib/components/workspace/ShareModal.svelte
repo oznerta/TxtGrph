@@ -221,7 +221,9 @@
           .single();
 
         if (error) throw error;
-        collaborators = [...collaborators, { id: data?.id || crypto.randomUUID(), email: targetEmail, role: inviteRole }];
+        const nextList = [...collaborators, { id: data?.id || crypto.randomUUID(), email: targetEmail, role: inviteRole }];
+        collaborators = nextList;
+        workspaceStore.updateFolderShareState(folder.id, true, nextList.length);
       } else if (diagram) {
         const { data, error } = await supabase
           .from('diagram_collaborators')
@@ -250,10 +252,13 @@
     try {
       if (folder) {
         await supabase.from('folder_collaborators').delete().eq('id', id);
+        const nextList = collaborators.filter((c) => c.id !== id);
+        collaborators = nextList;
+        workspaceStore.updateFolderShareState(folder.id, nextList.length > 0, nextList.length);
       } else {
         await supabase.from('diagram_collaborators').delete().eq('id', id);
+        collaborators = collaborators.filter((c) => c.id !== id);
       }
-      collaborators = collaborators.filter((c) => c.id !== id);
     } catch (err: any) {
       console.error('Failed to remove collaborator:', err);
     }

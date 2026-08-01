@@ -31,7 +31,8 @@
     Clock,
     Sparkles,
     Building2,
-    User
+    User,
+    Users
   } from 'lucide-svelte';
   import { workspaceStore } from '$lib/stores/workspaceStore.svelte';
 
@@ -312,6 +313,17 @@
                 >
                   <Edit3 size={14} />
                 </button>
+                <button
+                  onclick={() => {
+                    const currentFolder = folders.find((f) => f.id === crumb.id);
+                    if (currentFolder) onShareFolder(currentFolder);
+                  }}
+                  title="Share folder"
+                  class="ml-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <Share2 size={13} />
+                  <span>Share folder</span>
+                </button>
               </span>
             {:else}
               <button
@@ -331,6 +343,19 @@
 
     <!-- Right: Primary Action Buttons -->
     <div class="flex items-center gap-2.5 shrink-0">
+      {#if activeFolderId}
+        {@const currentActiveFolder = folders.find((f) => f.id === activeFolderId)}
+        {#if currentActiveFolder}
+          <button
+            onclick={() => onShareFolder(currentActiveFolder)}
+            class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
+          >
+            <Share2 class="w-4 h-4 text-amber-400" />
+            <span>Share folder</span>
+          </button>
+        {/if}
+      {/if}
+
       <div class="inline-flex rounded-xl shadow-lg border border-white/20 overflow-hidden bg-white text-black">
         <button
           onclick={() => onCreateDiagram(activeFolderId)}
@@ -509,8 +534,13 @@
                   <FolderIcon size={18} />
                 </div>
                 <div class="min-w-0 truncate">
-                  <h4 class="font-semibold text-xs text-white truncate group-hover:text-amber-400 transition-colors">
-                    {folder.name}
+                  <h4 class="font-semibold text-xs text-white truncate group-hover:text-amber-400 transition-colors flex items-center gap-1.5">
+                    <span class="truncate">{folder.name}</span>
+                    {#if folder.isShared}
+                      <span class="inline-flex items-center gap-0.5 rounded-full bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-bold text-sky-300 border border-sky-500/30 shrink-0 font-['IBM_Plex_Mono',monospace]" title="Shared folder">
+                        <Users size={10} /> Shared
+                      </span>
+                    {/if}
                   </h4>
                   <p class="text-[11px] text-white/40 mt-0.5 font-['IBM_Plex_Mono',monospace]">
                     {folderDiagramCount} {folderDiagramCount === 1 ? 'diagram' : 'diagrams'}
@@ -519,7 +549,18 @@
               </div>
 
               <!-- Options Popup Menu -->
-              <div class="relative shrink-0">
+              <div class="relative shrink-0 flex items-center gap-1">
+                <button
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    onShareFolder(folder);
+                  }}
+                  title="Share folder"
+                  class="p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-sky-400 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
+                >
+                  <Share2 size={14} />
+                </button>
+
                 <button
                   onclick={(e) => {
                     e.stopPropagation();
@@ -622,8 +663,13 @@
                   </td>
                   <td class="py-3 px-4 font-semibold text-white">
                     <div class="flex items-center gap-2.5">
-                      <FolderIcon size={16} class="text-amber-400" />
+                      <FolderIcon size={16} class="text-amber-400 shrink-0" />
                       <span>{folder.name}</span>
+                      {#if folder.isShared}
+                        <span class="inline-flex items-center gap-0.5 rounded-full bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-bold text-sky-300 border border-sky-500/30 shrink-0 font-['IBM_Plex_Mono',monospace]" title="Shared folder">
+                          <Users size={10} /> Shared
+                        </span>
+                      {/if}
                     </div>
                   </td>
                   <td class="py-3 px-4 text-white/50 font-['IBM_Plex_Mono',monospace]">
