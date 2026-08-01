@@ -231,284 +231,405 @@
     }
   }
 
-  interface PathCommand {
-    cmd: string;
-    args: number[];
+  // ============================================================================
+  // PRODUCTION-GRADE NODE DRAG & EDGE ROUTING ENGINE
+  // Builds a graph model from SVG, computes border anchors, and generates
+  // fresh bezier curves on every frame for buttery-smooth interaction.
+  // ============================================================================
+
+  interface GraphNode {
+    id: string;
+    el: SVGGElement;
+    cx: number;  // center x in SVG coords
+    cy: number;  // center y in SVG coords
+    width: number;
+    height: number;
+    tx: number;  // current translate X
+    ty: number;  // current translate Y
+    bboxX: number; // local bbox offset x
+    bboxY: number; // local bbox offset y
   }
 
-  interface ConnectedEdge {
+  interface GraphEdge {
     pathEl: SVGPathElement;
-    isStart: boolean;
-    isEnd: boolean;
-    initialCommands: PathCommand[];
-    labelEl?: SVGElement | null;
-    initialLabelX?: number;
-    initialLabelY?: number;
+    sourceId: string;
+    targetId: string;
+    labelEls: SVGElement[];  // edge labels, markers, etc.
+    markerEl: SVGElement | null; // arrowhead marker group
+    originalD: string;
   }
 
-  // Manual Node Dragging State (when Auto-Layout is untoggled)
+  // Drag state
   let isDraggingNode = $state(false);
-  let activeDraggedNode: SVGGElement | null = null;
+  let dragNodeId: string | null = null;
   let dragStartX = 0;
   let dragStartY = 0;
-  let initialNodeX = 0;
-  let initialNodeY = 0;
+  let dragInitTx = 0;
+  let dragInitTy = 0;
   let customNodePositions = $state<Record<string, { x: number; y: number }>>({});
-  let activeConnectedEdges: ConnectedEdge[] = [];
   let rAFPending = false;
   let pendingMouseX = 0;
   let pendingMouseY = 0;
 
-  function parseSvgPathD(d: string): PathCommand[] {
-    const commands: PathCommand[] = [];
-    const regex = /([a-zA-Z])([^a-zA-Z]*)/g;
-    let match;
-    while ((match = regex.exec(d)) !== null) {
-      const cmd = match[1];
-      const argsStr = match[2].trim();
-      const args = argsStr ? argsStr.split(/[\s,]+/).map(Number).filter((n) => !isNaN(n)) : [];
-      commands.push({ cmd, args });
+  // Graph model (rebuilt on each render)
+  let graphNodes: Map<string, GraphNode> = new Map();
+  let graphEdges: GraphEdge[] = [];
+
+  /**
+   * Parse the rendered SVG to build a complete graph model:
+   * - Discover all nodes with bounding boxes
+   * - Discover all edges and resolve their source/target node IDs
+   */
+  function buildGraphModel(svgEl: SVGSVGElement) {
+    graphNodes.clear();
+    graphEdges = [];
+
+    // 1. Discover all nodes
+    const nodeEls = svgEl.querySelectorAll(
+      'g.node, g.entityBox, g.entity, g.cluster, g[id*="flowchart-"], g.actor, g.classGroup, g.stateGroup'
+    );
+
+    nodeEls.forEach((el) => {
+      const gNode = el as SVGGElement;
+      const nodeId = gNode.id || gNode.getAttribute('id') || '';
+      if (!nodeId) return;
+
+      let bbox = { x: 0, y: 0, width: 100, height: 60 };
+      try {
+        const b = gNode.getBBox();
+        bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
+      } catch { /* fallback */ }
+
+      const transformAttr = gNode.getAttribute('transform') || '';
+      let tx = 0, ty = 0;
+      const m = transformAttr.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/);
+      if (m) { tx = parseFloat(m[1]); ty = parseFloat(m[2]); }
+
+      graphNodes.set(nodeId, {
+        id: nodeId,
+        el: gNode,
+        cx: tx + bbox.x + bbox.width / 2,
+        cy: ty + bbox.y + bbox.height / 2,
+        width: bbox.width,
+        height: bbox.height,
+        tx, ty,
+        bboxX: bbox.x,
+        bboxY: bbox.y
+      });
+    });
+
+    // 2. Discover all edges and resolve source/target nodes
+    const edgePaths = svgEl.querySelectorAll('path');
+    edgePaths.forEach((pathEl) => {
+      const dAttr = pathEl.getAttribute('d');
+      if (!dAttr || dAttr.trim().length < 5) return;
+
+      // Skip paths that are inside node shapes (rect outlines, etc.)
+      const closestNode = pathEl.closest('g.node, g.entityBox, g.entity, g.cluster, g.actor, g.classGroup, g.stateGroup');
+      if (closestNode) return; // This path belongs to a node shape, not an edge
+
+      // Parse start and end points from the path
+      const startMatch = dAttr.match(/^M\s*([-\d.]+)[,\s]+([-\d.]+)/);
+      if (!startMatch) return;
+      const startX = parseFloat(startMatch[1]);
+      const startY = parseFloat(startMatch[2]);
+
+      // Find the last absolute coordinate pair in the path
+      let endX = startX, endY = startY;
+      const cmdRegex = /([MLCQSTZ])\s*([-\d.,\s]*)/gi;
+      let cmdMatch;
+      while ((cmdMatch = cmdRegex.exec(dAttr)) !== null) {
+        const cmd = cmdMatch[1].toUpperCase();
+        if (cmd === 'Z') continue;
+        const nums = cmdMatch[2].trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
+        if (nums.length >= 2) {
+          endX = nums[nums.length - 2];
+          endY = nums[nums.length - 1];
+        }
+      }
+
+      // Find source node (closest to start point) and target node (closest to end point)
+      let sourceId = '';
+      let targetId = '';
+      let minStartDist = Infinity;
+      let minEndDist = Infinity;
+
+      // Also check CSS classes for explicit edge-node links
+      const pathClass = pathEl.getAttribute('class') || '';
+      const pathId = pathEl.getAttribute('id') || '';
+      const parentGroup = pathEl.closest('g.edgePath, g.relationship, g.edge, g.edgePaths');
+      const parentId = parentGroup?.getAttribute('id') || '';
+
+      graphNodes.forEach((node) => {
+        const rawId = node.id.replace(/^flowchart-/, '').replace(/^entity-/, '').replace(/-\d+$/, '');
+
+        // Check explicit CSS class links first
+        const isExplicitStart = pathClass.includes(`LS-${node.id}`) || pathClass.includes(`LS-${rawId}`) ||
+                               pathId.startsWith(`L-${node.id}`) || pathId.startsWith(`L-${rawId}`);
+        const isExplicitEnd = pathClass.includes(`LE-${node.id}`) || pathClass.includes(`LE-${rawId}`);
+
+        if (isExplicitStart) sourceId = node.id;
+        if (isExplicitEnd) targetId = node.id;
+
+        // Proximity-based fallback
+        const startDist = Math.hypot(startX - node.cx, startY - node.cy);
+        const endDist = Math.hypot(endX - node.cx, endY - node.cy);
+
+        if (startDist < minStartDist) { minStartDist = startDist; if (!sourceId) sourceId = node.id; }
+        if (endDist < minEndDist) { minEndDist = endDist; if (!targetId) targetId = node.id; }
+      });
+
+      // Override proximity results with explicit class matches
+      graphNodes.forEach((node) => {
+        const rawId = node.id.replace(/^flowchart-/, '').replace(/^entity-/, '').replace(/-\d+$/, '');
+        if (pathClass.includes(`LS-${node.id}`) || pathClass.includes(`LS-${rawId}`)) sourceId = node.id;
+        if (pathClass.includes(`LE-${node.id}`) || pathClass.includes(`LE-${rawId}`)) targetId = node.id;
+      });
+
+      if (!sourceId || !targetId) return;
+      if (minStartDist > 500 && minEndDist > 500) return; // Too far from any node
+
+      // Collect edge labels
+      const labelEls: SVGElement[] = [];
+      let markerEl: SVGElement | null = null;
+
+      if (parentGroup) {
+        parentGroup.querySelectorAll('.edgeLabel, .relationshipLabel, text, g.label, foreignObject').forEach(lbl => {
+          labelEls.push(lbl as SVGElement);
+        });
+        const marker = parentGroup.querySelector('marker, .arrowheadPath, polygon.arrowMarker');
+        if (marker) markerEl = marker as SVGElement;
+      }
+
+      graphEdges.push({
+        pathEl: pathEl as SVGPathElement,
+        sourceId,
+        targetId,
+        labelEls,
+        markerEl,
+        originalD: dAttr
+      });
+    });
+  }
+
+  /**
+   * Compute the anchor point on a rectangular node border where an edge should connect.
+   * Given two node centers, returns the point on the border of `node` facing toward `otherCenter`.
+   */
+  function computeBorderAnchor(
+    node: GraphNode,
+    otherCx: number, otherCy: number
+  ): { x: number; y: number } {
+    const halfW = node.width / 2 + 4;  // small padding
+    const halfH = node.height / 2 + 4;
+    const dx = otherCx - node.cx;
+    const dy = otherCy - node.cy;
+
+    if (dx === 0 && dy === 0) {
+      return { x: node.cx, y: node.cy - halfH };
     }
-    return commands;
+
+    // Determine which edge of the rectangle the line to otherCenter exits through
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    if (absDx / halfW > absDy / halfH) {
+      // Exits left or right
+      const sign = dx > 0 ? 1 : -1;
+      const anchorX = node.cx + sign * halfW;
+      const anchorY = node.cy + dy * (halfW / absDx);
+      return { x: anchorX, y: anchorY };
+    } else {
+      // Exits top or bottom
+      const sign = dy > 0 ? 1 : -1;
+      const anchorX = node.cx + dx * (halfH / absDy);
+      const anchorY = node.cy + sign * halfH;
+      return { x: anchorX, y: anchorY };
+    }
   }
 
-  function serializeSvgPathD(commands: PathCommand[]): string {
-    return commands
-      .map((c) => `${c.cmd} ${c.args.join(' ')}`)
-      .join(' ');
+  /**
+   * Generate a smooth cubic bezier SVG path between two anchor points.
+   * Control points are offset along the primary direction for natural curves.
+   */
+  function generateEdgePath(
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ): string {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.hypot(dx, dy);
+    const curvature = Math.min(dist * 0.4, 80); // adaptive curvature
+
+    // Determine curve direction: prefer bending along the longer axis
+    let cp1x: number, cp1y: number, cp2x: number, cp2y: number;
+
+    if (Math.abs(dy) > Math.abs(dx)) {
+      // Primarily vertical connection
+      cp1x = start.x;
+      cp1y = start.y + (dy > 0 ? curvature : -curvature);
+      cp2x = end.x;
+      cp2y = end.y - (dy > 0 ? curvature : -curvature);
+    } else {
+      // Primarily horizontal connection
+      cp1x = start.x + (dx > 0 ? curvature : -curvature);
+      cp1y = start.y;
+      cp2x = end.x - (dx > 0 ? curvature : -curvature);
+      cp2y = end.y;
+    }
+
+    return `M ${start.x} ${start.y} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${end.x} ${end.y}`;
   }
 
+  /**
+   * Update all edges connected to a given node.
+   * Recomputes anchors and generates fresh bezier curves.
+   */
+  function updateEdgesForNode(nodeId: string) {
+    graphEdges.forEach((edge) => {
+      if (edge.sourceId !== nodeId && edge.targetId !== nodeId) return;
+
+      const sourceNode = graphNodes.get(edge.sourceId);
+      const targetNode = graphNodes.get(edge.targetId);
+      if (!sourceNode || !targetNode) return;
+
+      // Compute border anchors
+      const startAnchor = computeBorderAnchor(sourceNode, targetNode.cx, targetNode.cy);
+      const endAnchor = computeBorderAnchor(targetNode, sourceNode.cx, sourceNode.cy);
+
+      // Generate fresh bezier path
+      const newD = generateEdgePath(startAnchor, endAnchor);
+      edge.pathEl.setAttribute('d', newD);
+
+      // Update edge labels to midpoint of the curve
+      if (edge.labelEls.length > 0) {
+        const midX = (startAnchor.x + endAnchor.x) / 2;
+        const midY = (startAnchor.y + endAnchor.y) / 2;
+        edge.labelEls.forEach((lbl) => {
+          if (lbl.getAttribute('transform') !== null) {
+            lbl.setAttribute('transform', `translate(${midX}, ${midY})`);
+          } else if (lbl.tagName === 'foreignObject' || lbl.tagName === 'text') {
+            const currentX = parseFloat(lbl.getAttribute('x') || '0');
+            const currentY = parseFloat(lbl.getAttribute('y') || '0');
+            const lblWidth = parseFloat(lbl.getAttribute('width') || '0');
+            const lblHeight = parseFloat(lbl.getAttribute('height') || '0');
+            lbl.setAttribute('x', String(midX - lblWidth / 2));
+            lbl.setAttribute('y', String(midY - lblHeight / 2));
+          }
+        });
+      }
+    });
+  }
+
+  /**
+   * Update a GraphNode's computed center after its transform changes.
+   */
+  function updateNodeCenter(node: GraphNode) {
+    node.cx = node.tx + node.bboxX + node.width / 2;
+    node.cy = node.ty + node.bboxY + node.height / 2;
+  }
+
+  /**
+   * Attach drag listeners to all nodes in the SVG.
+   */
   function attachNodeDragListeners() {
     if (!canvasContainer) return;
     const svgEl = canvasContainer.querySelector('svg');
     if (!svgEl) return;
 
-    // Target all node & entity groups across flowcharts, ER diagrams, class diagrams, sequence diagrams, etc.
-    const nodes = svgEl.querySelectorAll('g.node, g.entityBox, g.entity, g.cluster, g[id*="flowchart-"], g.actor, g.classGroup, g.stateGroup');
+    // Build the graph model from the current SVG
+    buildGraphModel(svgEl as SVGSVGElement);
 
-    nodes.forEach((nodeEl) => {
-      const gNode = nodeEl as SVGGElement;
-      gNode.style.cursor = !isAutoLayoutEnabled ? 'grab' : 'default';
+    graphNodes.forEach((node) => {
+      node.el.style.cursor = !isAutoLayoutEnabled ? 'grab' : 'default';
 
-      // Restore custom position if saved and auto-layout is disabled
-      const nodeId = gNode.id || gNode.getAttribute('id') || '';
-      if (!isAutoLayoutEnabled && nodeId && customNodePositions[nodeId]) {
-        const pos = customNodePositions[nodeId];
-        gNode.setAttribute('transform', `translate(${pos.x}, ${pos.y})`);
+      // Restore saved positions when auto-layout is off
+      if (!isAutoLayoutEnabled && customNodePositions[node.id]) {
+        const pos = customNodePositions[node.id];
+        node.tx = pos.x;
+        node.ty = pos.y;
+        node.el.setAttribute('transform', `translate(${pos.x}, ${pos.y})`);
+        updateNodeCenter(node);
       }
 
-      gNode.onmousedown = (e: MouseEvent) => {
+      node.el.onmousedown = (e: MouseEvent) => {
         if (isAutoLayoutEnabled) return;
-        if (e.button !== 0) return; // Only main click
+        if (e.button !== 0) return;
 
         e.stopPropagation();
         e.preventDefault();
 
-        activeDraggedNode = gNode;
+        dragNodeId = node.id;
         isDraggingNode = true;
-        gNode.style.cursor = 'grabbing';
+        node.el.style.cursor = 'grabbing';
 
-        const transformAttr = gNode.getAttribute('transform') || '';
-        const match = transformAttr.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/);
-        if (match) {
-          initialNodeX = parseFloat(match[1]);
-          initialNodeY = parseFloat(match[2]);
-        } else {
-          initialNodeX = 0;
-          initialNodeY = 0;
-        }
+        // Read current transform
+        const transformAttr = node.el.getAttribute('transform') || '';
+        const m = transformAttr.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/);
+        dragInitTx = m ? parseFloat(m[1]) : 0;
+        dragInitTy = m ? parseFloat(m[2]) : 0;
 
         dragStartX = e.clientX;
         dragStartY = e.clientY;
-
-        // Discover connected edge paths for this node
-        activeConnectedEdges = [];
-        const rawNodeId = nodeId.replace(/^flowchart-/, '').replace(/^entity-/, '').replace(/-\d+$/, '');
-
-        // Bounding box of the node in SVG coordinates
-        let bbox = { x: 0, y: 0, width: 120, height: 80 };
-        try {
-          if ((gNode as any).getBBox) {
-            const b = (gNode as any).getBBox();
-            bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
-          }
-        } catch {
-          // Fallback
-        }
-
-        const nodeMinX = initialNodeX + bbox.x - 40;
-        const nodeMaxX = initialNodeX + bbox.x + bbox.width + 40;
-        const nodeMinY = initialNodeY + bbox.y - 40;
-        const nodeMaxY = initialNodeY + bbox.y + bbox.height + 40;
-        const nodeCenterX = initialNodeX + bbox.x + bbox.width / 2;
-        const nodeCenterY = initialNodeY + bbox.y + bbox.height / 2;
-        const proxRadius = Math.max(bbox.width, bbox.height) * 0.85 + 60;
-
-        const allPaths = svgEl.querySelectorAll('path');
-        allPaths.forEach((pathEl) => {
-          const dAttr = pathEl.getAttribute('d');
-          if (!dAttr) return;
-
-          const pathClass = pathEl.getAttribute('class') || '';
-          const pathId = pathEl.getAttribute('id') || '';
-          const parentId = pathEl.parentElement?.getAttribute('id') || '';
-          const parsed = parseSvgPathD(dAttr);
-          if (parsed.length === 0) return;
-
-          const startPt = { x: parsed[0].args[0] ?? 0, y: parsed[0].args[1] ?? 0 };
-          const lastCmd = parsed[parsed.length - 1];
-          const lastLen = lastCmd.args.length;
-          const endPt = {
-            x: lastLen >= 2 ? lastCmd.args[lastLen - 2] : 0,
-            y: lastLen >= 2 ? lastCmd.args[lastLen - 1] : 0
-          };
-
-          // 1. Explicit ID/Class checks
-          const isStartClass =
-            (nodeId && pathClass.includes(`LS-${nodeId}`)) ||
-            (rawNodeId && pathClass.includes(`LS-${rawNodeId}`)) ||
-            (nodeId && pathId.startsWith(`L-${nodeId}`)) ||
-            (rawNodeId && pathId.startsWith(`L-${rawNodeId}`));
-
-          const isEndClass =
-            (nodeId && pathClass.includes(`LE-${nodeId}`)) ||
-            (rawNodeId && pathClass.includes(`LE-${rawNodeId}`)) ||
-            (nodeId && (pathId.includes(`-${nodeId}`) || parentId.includes(nodeId))) ||
-            (rawNodeId && (pathId.includes(`-${rawNodeId}`) || parentId.includes(rawNodeId)));
-
-          // 2. Bounding Box & Proximity checks
-          const startInBox = startPt.x >= nodeMinX && startPt.x <= nodeMaxX && startPt.y >= nodeMinY && startPt.y <= nodeMaxY;
-          const endInBox = endPt.x >= nodeMinX && endPt.x <= nodeMaxX && endPt.y >= nodeMinY && endPt.y <= nodeMaxY;
-
-          const startDist = Math.hypot(startPt.x - nodeCenterX, startPt.y - nodeCenterY);
-          const endDist = Math.hypot(endPt.x - nodeCenterX, endPt.y - nodeCenterY);
-
-          const isStart = Boolean(isStartClass || startInBox || startDist < proxRadius);
-          const isEnd = Boolean(isEndClass || endInBox || endDist < proxRadius);
-
-          if (isStart || isEnd) {
-            // Find edge label element if present
-            let labelEl: SVGElement | null = null;
-            let initialLabelX = 0;
-            let initialLabelY = 0;
-
-            const edgeGroup = pathEl.closest('g.edgePath, g.relationship, g.edge');
-            if (edgeGroup) {
-              const lbl = edgeGroup.querySelector('.edgeLabel, .relationshipLabel, text, g.label');
-              if (lbl) {
-                labelEl = lbl as SVGElement;
-                const tr = labelEl.getAttribute('transform') || '';
-                const m = tr.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/);
-                if (m) {
-                  initialLabelX = parseFloat(m[1]);
-                  initialLabelY = parseFloat(m[2]);
-                }
-              }
-            }
-
-            activeConnectedEdges.push({
-              pathEl: pathEl as SVGPathElement,
-              isStart,
-              isEnd,
-              initialCommands: parsed,
-              labelEl,
-              initialLabelX,
-              initialLabelY
-            });
-          }
-        });
 
         window.addEventListener('mousemove', handleNodeDragMove);
         window.addEventListener('mouseup', handleNodeDragEnd);
       };
     });
+
+    // If auto-layout is off, re-route all edges for restored positions
+    if (!isAutoLayoutEnabled && Object.keys(customNodePositions).length > 0) {
+      graphNodes.forEach((node) => {
+        updateEdgesForNode(node.id);
+      });
+    }
   }
 
   function handleNodeDragMove(e: MouseEvent) {
-    if (!isDraggingNode || !activeDraggedNode) return;
+    if (!isDraggingNode || !dragNodeId) return;
 
     pendingMouseX = e.clientX;
     pendingMouseY = e.clientY;
 
     if (!rAFPending) {
       rAFPending = true;
-      requestAnimationFrame(renderNodeDragFrame);
+      requestAnimationFrame(renderDragFrame);
     }
   }
 
-  function renderNodeDragFrame() {
+  function renderDragFrame() {
     rAFPending = false;
-    if (!isDraggingNode || !activeDraggedNode) return;
+    if (!isDraggingNode || !dragNodeId) return;
+
+    const node = graphNodes.get(dragNodeId);
+    if (!node) return;
 
     const dx = (pendingMouseX - dragStartX) / zoomScale;
     const dy = (pendingMouseY - dragStartY) / zoomScale;
 
-    const newX = Math.round(initialNodeX + dx);
-    const newY = Math.round(initialNodeY + dy);
+    const newTx = dragInitTx + dx;
+    const newTy = dragInitTy + dy;
 
-    activeDraggedNode.setAttribute('transform', `translate(${newX}, ${newY})`);
+    // Move the node
+    node.tx = newTx;
+    node.ty = newTy;
+    node.el.setAttribute('transform', `translate(${newTx}, ${newTy})`);
+    updateNodeCenter(node);
 
-    const nodeId = activeDraggedNode.id || activeDraggedNode.getAttribute('id') || '';
-    if (nodeId) {
-      customNodePositions[nodeId] = { x: newX, y: newY };
-    }
+    // Save position
+    customNodePositions[dragNodeId] = { x: newTx, y: newTy };
 
-    // Smoothly update all connected SVG paths and relationship labels
-    activeConnectedEdges.forEach((edge) => {
-      const updatedCmds = JSON.parse(JSON.stringify(edge.initialCommands)) as PathCommand[];
-
-      if (edge.isStart && updatedCmds[0]?.args && updatedCmds[0].args.length >= 2) {
-        // Update M x y
-        updatedCmds[0].args[0] += dx;
-        updatedCmds[0].args[1] += dy;
-
-        // Update first control point or line target
-        if (updatedCmds[1] && updatedCmds[1].args && updatedCmds[1].args.length >= 2) {
-          if (updatedCmds[1].cmd === 'C' && updatedCmds[1].args.length >= 6) {
-            updatedCmds[1].args[0] += dx;
-            updatedCmds[1].args[1] += dy;
-          } else if (updatedCmds[1].cmd === 'Q' && updatedCmds[1].args.length >= 4) {
-            updatedCmds[1].args[0] += dx;
-            updatedCmds[1].args[1] += dy;
-          }
-        }
-      }
-
-      if (edge.isEnd && updatedCmds.length > 0) {
-        const lastCmd = updatedCmds[updatedCmds.length - 1];
-        const n = lastCmd.args.length;
-        if (n >= 2) {
-          lastCmd.args[n - 2] += dx;
-          lastCmd.args[n - 1] += dy;
-
-          if (lastCmd.cmd === 'C' && n >= 6) {
-            lastCmd.args[n - 4] += dx;
-            lastCmd.args[n - 3] += dy;
-          } else if (lastCmd.cmd === 'Q' && n >= 4) {
-            lastCmd.args[n - 4] += dx;
-            lastCmd.args[n - 3] += dy;
-          }
-        }
-      }
-
-      edge.pathEl.setAttribute('d', serializeSvgPathD(updatedCmds));
-
-      // Shift relationship label position proportionately
-      if (edge.labelEl && edge.initialLabelX !== undefined && edge.initialLabelY !== undefined) {
-        const factor = edge.isStart && edge.isEnd ? 1.0 : 0.5;
-        const lx = Math.round(edge.initialLabelX + dx * factor);
-        const ly = Math.round(edge.initialLabelY + dy * factor);
-        edge.labelEl.setAttribute('transform', `translate(${lx}, ${ly})`);
-      }
-    });
+    // Re-route all connected edges with fresh bezier curves
+    updateEdgesForNode(dragNodeId);
   }
 
   function handleNodeDragEnd() {
-    if (activeDraggedNode) {
-      activeDraggedNode.style.cursor = 'grab';
+    if (dragNodeId) {
+      const node = graphNodes.get(dragNodeId);
+      if (node) node.el.style.cursor = 'grab';
     }
     isDraggingNode = false;
-    activeDraggedNode = null;
+    dragNodeId = null;
     rAFPending = false;
     window.removeEventListener('mousemove', handleNodeDragMove);
     window.removeEventListener('mouseup', handleNodeDragEnd);
