@@ -241,6 +241,9 @@
     isStart: boolean;
     isEnd: boolean;
     initialCommands: PathCommand[];
+    labelEl?: SVGElement | null;
+    initialLabelX?: number;
+    initialLabelY?: number;
   }
 
   // Manual Node Dragging State (when Auto-Layout is untoggled)
@@ -252,6 +255,9 @@
   let initialNodeY = 0;
   let customNodePositions = $state<Record<string, { x: number; y: number }>>({});
   let activeConnectedEdges: ConnectedEdge[] = [];
+  let rAFPending = false;
+  let pendingMouseX = 0;
+  let pendingMouseY = 0;
 
   function parseSvgPathD(d: string): PathCommand[] {
     const commands: PathCommand[] = [];
@@ -277,8 +283,8 @@
     const svgEl = canvasContainer.querySelector('svg');
     if (!svgEl) return;
 
-    // Target all node groups in Mermaid SVG
-    const nodes = svgEl.querySelectorAll('g.node, g.cluster, g[id*="flowchart-"], g.actor, g.classGroup');
+    // Target all node & entity groups across flowcharts, ER diagrams, class diagrams, sequence diagrams, etc.
+    const nodes = svgEl.querySelectorAll('g.node, g.entityBox, g.entity, g.cluster, g[id*="flowchart-"], g.actor, g.classGroup, g.stateGroup');
 
     nodes.forEach((nodeEl) => {
       const gNode = nodeEl as SVGGElement;
@@ -317,12 +323,26 @@
 
         // Discover connected edge paths for this node
         activeConnectedEdges = [];
-        const nodeId = gNode.id || gNode.getAttribute('id') || '';
-        const rawNodeId = nodeId.replace(/^flowchart-/, '').replace(/-\d+$/, '');
+        const rawNodeId = nodeId.replace(/^flowchart-/, '').replace(/^entity-/, '').replace(/-\d+$/, '');
 
-        const nodeBbox = (gNode as any).getBBox ? (gNode as any).getBBox() : null;
-        const nodeCenterX = initialNodeX + (nodeBbox ? nodeBbox.x + nodeBbox.width / 2 : 0);
-        const nodeCenterY = initialNodeY + (nodeBbox ? nodeBbox.y + nodeBbox.height / 2 : 0);
+        // Bounding box of the node in SVG coordinates
+        let bbox = { x: 0, y: 0, width: 120, height: 80 };
+        try {
+          if ((gNode as any).getBBox) {
+            const b = (gNode as any).getBBox();
+            bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
+          }
+        } catch {
+          // Fallback
+        }
+
+        const nodeMinX = initialNodeX + bbox.x - 40;
+        const nodeMaxX = initialNodeX + bbox.x + bbox.width + 40;
+        const nodeMinY = initialNodeY + bbox.y - 40;
+        const nodeMaxY = initialNodeY + bbox.y + bbox.height + 40;
+        const nodeCenterX = initialNodeX + bbox.x + bbox.width / 2;
+        const nodeCenterY = initialNodeY + bbox.y + bbox.height / 2;
+        const proxRadius = Math.max(bbox.width, bbox.height) * 0.85 + 60;
 
         const allPaths = svgEl.querySelectorAll('path');
         allPaths.forEach((pathEl) => {
@@ -331,10 +351,11 @@
 
           const pathClass = pathEl.getAttribute('class') || '';
           const pathId = pathEl.getAttribute('id') || '';
+          const parentId = pathEl.parentElement?.getAttribute('id') || '';
           const parsed = parseSvgPathD(dAttr);
           if (parsed.length === 0) return;
 
-          const startPt = { x: parsed[0].args[0] || 0, y: parsed[0].args[1] || 0 };
+          const startPt = { x: parsed[0].args[0] ?? 0, y: parsed[0].args[1] ?? 0 };
           const lastCmd = parsed[parsed.length - 1];
           const lastLen = lastCmd.args.length;
           const endPt = {
@@ -342,21 +363,57 @@
             y: lastLen >= 2 ? lastCmd.args[lastLen - 1] : 0
           };
 
-          const isStartClass = (nodeId && pathClass.includes(`LS-${nodeId}`)) || (rawNodeId && pathClass.includes(`LS-${rawNodeId}`)) || (nodeId && pathId.startsWith(`L-${nodeId}`)) || (rawNodeId && pathId.startsWith(`L-${rawNodeId}`));
-          const isEndClass = (nodeId && pathClass.includes(`LE-${nodeId}`)) || (rawNodeId && pathClass.includes(`LE-${rawNodeId}`)) || (nodeId && pathId.includes(`-${nodeId}`)) || (rawNodeId && pathId.includes(`-${rawNodeId}`));
+          // 1. Explicit ID/Class checks
+          const isStartClass =
+            (nodeId && pathClass.includes(`LS-${nodeId}`)) ||
+            (rawNodeId && pathClass.includes(`LS-${rawNodeId}`)) ||
+            (nodeId && pathId.startsWith(`L-${nodeId}`)) ||
+            (rawNodeId && pathId.startsWith(`L-${rawNodeId}`));
 
-          const isStartProx = Math.hypot(startPt.x - nodeCenterX, startPt.y - nodeCenterY) < 120;
-          const isEndProx = Math.hypot(endPt.x - nodeCenterX, endPt.y - nodeCenterY) < 120;
+          const isEndClass =
+            (nodeId && pathClass.includes(`LE-${nodeId}`)) ||
+            (rawNodeId && pathClass.includes(`LE-${rawNodeId}`)) ||
+            (nodeId && (pathId.includes(`-${nodeId}`) || parentId.includes(nodeId))) ||
+            (rawNodeId && (pathId.includes(`-${rawNodeId}`) || parentId.includes(rawNodeId)));
 
-          const isStart = Boolean(isStartClass || isStartProx);
-          const isEnd = Boolean(isEndClass || isEndProx);
+          // 2. Bounding Box & Proximity checks
+          const startInBox = startPt.x >= nodeMinX && startPt.x <= nodeMaxX && startPt.y >= nodeMinY && startPt.y <= nodeMaxY;
+          const endInBox = endPt.x >= nodeMinX && endPt.x <= nodeMaxX && endPt.y >= nodeMinY && endPt.y <= nodeMaxY;
+
+          const startDist = Math.hypot(startPt.x - nodeCenterX, startPt.y - nodeCenterY);
+          const endDist = Math.hypot(endPt.x - nodeCenterX, endPt.y - nodeCenterY);
+
+          const isStart = Boolean(isStartClass || startInBox || startDist < proxRadius);
+          const isEnd = Boolean(isEndClass || endInBox || endDist < proxRadius);
 
           if (isStart || isEnd) {
+            // Find edge label element if present
+            let labelEl: SVGElement | null = null;
+            let initialLabelX = 0;
+            let initialLabelY = 0;
+
+            const edgeGroup = pathEl.closest('g.edgePath, g.relationship, g.edge');
+            if (edgeGroup) {
+              const lbl = edgeGroup.querySelector('.edgeLabel, .relationshipLabel, text, g.label');
+              if (lbl) {
+                labelEl = lbl as SVGElement;
+                const tr = labelEl.getAttribute('transform') || '';
+                const m = tr.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/);
+                if (m) {
+                  initialLabelX = parseFloat(m[1]);
+                  initialLabelY = parseFloat(m[2]);
+                }
+              }
+            }
+
             activeConnectedEdges.push({
               pathEl: pathEl as SVGPathElement,
               isStart,
               isEnd,
-              initialCommands: parsed
+              initialCommands: parsed,
+              labelEl,
+              initialLabelX,
+              initialLabelY
             });
           }
         });
@@ -370,8 +427,21 @@
   function handleNodeDragMove(e: MouseEvent) {
     if (!isDraggingNode || !activeDraggedNode) return;
 
-    const dx = (e.clientX - dragStartX) / zoomScale;
-    const dy = (e.clientY - dragStartY) / zoomScale;
+    pendingMouseX = e.clientX;
+    pendingMouseY = e.clientY;
+
+    if (!rAFPending) {
+      rAFPending = true;
+      requestAnimationFrame(renderNodeDragFrame);
+    }
+  }
+
+  function renderNodeDragFrame() {
+    rAFPending = false;
+    if (!isDraggingNode || !activeDraggedNode) return;
+
+    const dx = (pendingMouseX - dragStartX) / zoomScale;
+    const dy = (pendingMouseY - dragStartY) / zoomScale;
 
     const newX = Math.round(initialNodeX + dx);
     const newY = Math.round(initialNodeY + dy);
@@ -383,17 +453,24 @@
       customNodePositions[nodeId] = { x: newX, y: newY };
     }
 
-    // Update connected edge path endpoints so arrows follow the node!
+    // Smoothly update all connected SVG paths and relationship labels
     activeConnectedEdges.forEach((edge) => {
       const updatedCmds = JSON.parse(JSON.stringify(edge.initialCommands)) as PathCommand[];
 
       if (edge.isStart && updatedCmds[0]?.args && updatedCmds[0].args.length >= 2) {
+        // Update M x y
         updatedCmds[0].args[0] += dx;
         updatedCmds[0].args[1] += dy;
 
-        if (updatedCmds[1] && (updatedCmds[1].cmd === 'C' || updatedCmds[1].cmd === 'Q') && updatedCmds[1].args.length >= 2) {
-          updatedCmds[1].args[0] += dx;
-          updatedCmds[1].args[1] += dy;
+        // Update first control point or line target
+        if (updatedCmds[1] && updatedCmds[1].args && updatedCmds[1].args.length >= 2) {
+          if (updatedCmds[1].cmd === 'C' && updatedCmds[1].args.length >= 6) {
+            updatedCmds[1].args[0] += dx;
+            updatedCmds[1].args[1] += dy;
+          } else if (updatedCmds[1].cmd === 'Q' && updatedCmds[1].args.length >= 4) {
+            updatedCmds[1].args[0] += dx;
+            updatedCmds[1].args[1] += dy;
+          }
         }
       }
 
@@ -404,7 +481,10 @@
           lastCmd.args[n - 2] += dx;
           lastCmd.args[n - 1] += dy;
 
-          if (lastCmd.cmd === 'C' && n >= 4) {
+          if (lastCmd.cmd === 'C' && n >= 6) {
+            lastCmd.args[n - 4] += dx;
+            lastCmd.args[n - 3] += dy;
+          } else if (lastCmd.cmd === 'Q' && n >= 4) {
             lastCmd.args[n - 4] += dx;
             lastCmd.args[n - 3] += dy;
           }
@@ -412,16 +492,24 @@
       }
 
       edge.pathEl.setAttribute('d', serializeSvgPathD(updatedCmds));
+
+      // Shift relationship label position proportionately
+      if (edge.labelEl && edge.initialLabelX !== undefined && edge.initialLabelY !== undefined) {
+        const factor = edge.isStart && edge.isEnd ? 1.0 : 0.5;
+        const lx = Math.round(edge.initialLabelX + dx * factor);
+        const ly = Math.round(edge.initialLabelY + dy * factor);
+        edge.labelEl.setAttribute('transform', `translate(${lx}, ${ly})`);
+      }
     });
   }
 
   function handleNodeDragEnd() {
     if (activeDraggedNode) {
       activeDraggedNode.style.cursor = 'grab';
-      activeDraggedNode = null;
     }
     isDraggingNode = false;
-    activeConnectedEdges = [];
+    activeDraggedNode = null;
+    rAFPending = false;
     window.removeEventListener('mousemove', handleNodeDragMove);
     window.removeEventListener('mouseup', handleNodeDragEnd);
   }
