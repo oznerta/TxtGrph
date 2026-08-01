@@ -14,7 +14,7 @@ export const load: PageLoad = async ({ params }) => {
   const userEmail = sessionData?.session?.user?.email || null;
   const userId = sessionData?.session?.user?.id || null;
 
-  // 1. Try resolving diagram by share_token OR by id (if inside a shared folder)
+  // 1. Try resolving diagram by share_token OR id (if inside a shared folder)
   const { data: diagramData } = await supabase
     .from('diagrams')
     .select('id, user_id, folder_id, share_token, title, code, config, updated_at, is_shared, public_access_role, is_deleted')
@@ -69,6 +69,67 @@ export const load: PageLoad = async ({ params }) => {
         updatedAt: diagramData.updated_at
       };
 
+      // Fetch parent folder tree if diagram belongs to a folder
+      let treeFolders: any[] = [];
+      let rootFolder: any = null;
+      let currentFolder: any = null;
+
+      if (diagramData.folder_id) {
+        let currentParentId: string | null = diagramData.folder_id;
+
+        while (currentParentId) {
+          const { data: f } = await supabase
+            .from('folders')
+            .select('id, name, parent_id, share_token, is_shared')
+            .eq('id', currentParentId)
+            .eq('is_deleted', false)
+            .single();
+
+          if (!f) break;
+          if (!currentFolder) currentFolder = f;
+          if (f.is_shared || !f.parent_id) {
+            rootFolder = f;
+            if (f.is_shared) break;
+          }
+          currentParentId = f.parent_id;
+        }
+
+        const rootId = rootFolder ? rootFolder.id : diagramData.folder_id;
+        const allFolderIds: string[] = [rootId];
+        let currentLevel = [rootId];
+
+        while (currentLevel.length > 0) {
+          const { data: children } = await supabase
+            .from('folders')
+            .select('id, name, parent_id, share_token, updated_at')
+            .in('parent_id', currentLevel)
+            .eq('is_deleted', false);
+
+          if (!children || children.length === 0) break;
+          const childIds = children.map((c: any) => c.id);
+          allFolderIds.push(...childIds);
+          currentLevel = childIds;
+        }
+
+        const { data: fetchedTreeFolders } = await supabase
+          .from('folders')
+          .select('id, user_id, parent_id, name, is_shared, share_token, updated_at')
+          .in('id', allFolderIds)
+          .eq('is_deleted', false);
+
+        treeFolders = (fetchedTreeFolders || []).map((f: any) => ({
+          id: f.id,
+          userId: f.user_id,
+          parentId: f.parent_id,
+          name: f.name,
+          isShared: f.is_shared,
+          shareToken: f.share_token,
+          isDeleted: false,
+          createdAt: f.updated_at,
+          updatedAt: f.updated_at
+        }));
+      }
+
       const config = (diagramData.config || {}) as any;
       const allowComments = config.allowComments !== false;
       const allowTimeline = config.allowTimeline === true;
@@ -77,9 +138,13 @@ export const load: PageLoad = async ({ params }) => {
       return {
         type: 'diagram' as const,
         diagram: sharedDiagram,
+        rootFolder,
+        currentFolder,
+        treeFolders,
         userRole: effectiveRole,
         userEmail,
         isLoggedIn: !!userId,
+        session: sessionData?.session,
         allowComments,
         allowTimeline,
         allowForking
@@ -114,9 +179,29 @@ export const load: PageLoad = async ({ params }) => {
     }
 
     if (canAccessFolder) {
-      // Recursively fetch all sub-folders and diagrams inside folderData.id tree
-      const allFolderIds: string[] = [folderData.id];
-      let currentParentIds: string[] = [folderData.id];
+      // Find root shared folder
+      let rootFolder = folderData;
+      let currParentId = folderData.parent_id;
+
+      while (currParentId) {
+        const { data: pf } = await supabase
+          .from('folders')
+          .select('id, user_id, parent_id, name, is_shared, share_token, public_access_role, updated_at')
+          .eq('id', currParentId)
+          .eq('is_deleted', false)
+          .single();
+
+        if (!pf) break;
+        if (pf.is_shared) {
+          rootFolder = pf;
+          break;
+        }
+        currParentId = pf.parent_id;
+      }
+
+      // Fetch all folder IDs under rootFolder.id tree
+      const allFolderIds: string[] = [rootFolder.id];
+      let currentParentIds: string[] = [rootFolder.id];
 
       while (currentParentIds.length > 0) {
         const { data: children } = await supabase
@@ -131,22 +216,48 @@ export const load: PageLoad = async ({ params }) => {
         currentParentIds = childIds;
       }
 
-      // Fetch sub-folders (direct children of the current folder)
-      const { data: directSubFolders } = await supabase
+      // Fetch all tree folders
+      const { data: dbTreeFolders } = await supabase
         .from('folders')
-        .select('id, name, share_token, updated_at')
-        .eq('parent_id', folderData.id)
+        .select('id, user_id, parent_id, name, is_shared, share_token, updated_at')
+        .in('id', allFolderIds)
         .eq('is_deleted', false);
 
-      // Fetch diagrams across all accessible folder IDs in tree
-      const { data: folderDiagrams } = await supabase
+      // Direct sub-folders of current folderData.id
+      const directSubFolders = (dbTreeFolders || []).filter((f: any) => f.parent_id === folderData.id);
+
+      // Fetch all diagrams in the entire shared folder tree
+      const { data: dbDiagrams } = await supabase
         .from('diagrams')
-        .select('id, folder_id, share_token, title, code, config, updated_at')
+        .select('id, user_id, folder_id, share_token, title, code, config, updated_at')
         .in('folder_id', allFolderIds)
         .eq('is_deleted', false);
 
+      const allTreeDiagrams = (dbDiagrams || []).map((d: any) => ({
+        id: d.id,
+        userId: d.user_id,
+        folderId: d.folder_id,
+        shareToken: d.share_token,
+        title: d.title,
+        code: d.code,
+        config: d.config || {},
+        isShared: true,
+        isDeleted: false,
+        createdAt: d.updated_at,
+        updatedAt: d.updated_at
+      }));
+
+      // Diagrams belonging to current folderData.id
+      const currentFolderDiagrams = allTreeDiagrams.filter((d: any) => d.folderId === folderData.id);
+
       return {
         type: 'folder' as const,
+        rootFolder: {
+          id: rootFolder.id,
+          name: rootFolder.name,
+          shareToken: rootFolder.share_token,
+          updatedAt: rootFolder.updated_at
+        },
         folder: {
           id: folderData.id,
           name: folderData.name,
@@ -154,23 +265,28 @@ export const load: PageLoad = async ({ params }) => {
           updatedAt: folderData.updated_at,
           publicAccessRole: effectiveFolderRole
         },
-        subFolders: (directSubFolders || []).map((f: any) => ({
+        subFolders: directSubFolders.map((f: any) => ({
           id: f.id,
           name: f.name,
           shareToken: f.share_token,
           updatedAt: f.updated_at
         })),
-        diagrams: (folderDiagrams || []).map((d: any) => ({
-          id: d.id,
-          folderId: d.folder_id,
-          shareToken: d.share_token,
-          title: d.title,
-          code: d.code,
-          config: d.config || {},
-          updatedAt: d.updated_at
+        diagrams: currentFolderDiagrams,
+        treeFolders: (dbTreeFolders || []).map((f: any) => ({
+          id: f.id,
+          userId: f.user_id,
+          parentId: f.parent_id,
+          name: f.name,
+          isShared: f.is_shared,
+          shareToken: f.share_token,
+          isDeleted: false,
+          createdAt: f.updated_at,
+          updatedAt: f.updated_at
         })),
+        allTreeDiagrams,
         userRole: effectiveFolderRole,
-        isLoggedIn: !!userId
+        isLoggedIn: !!userId,
+        session: sessionData?.session
       };
     }
   }
