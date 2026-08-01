@@ -627,3 +627,24 @@ BEGIN
   SELECT DISTINCT af.id FROM accessible_folders af;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' AND table_name = 'folders' AND column_name = 'is_shared'
+  ) THEN
+    ALTER TABLE public.folders ADD COLUMN is_shared BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE public.folders ADD COLUMN share_token UUID DEFAULT gen_random_uuid();
+    ALTER TABLE public.folders ADD COLUMN share_updated_at TIMESTAMPTZ DEFAULT now();
+  END IF;
+END $$;
+
+DROP POLICY IF EXISTS "Public can view shared active folders" ON public.folders;
+CREATE POLICY "Public can view shared active folders"
+  ON public.folders FOR SELECT
+  USING (
+    is_deleted = false 
+    AND is_shared = true 
+    AND share_token IS NOT NULL
+  );

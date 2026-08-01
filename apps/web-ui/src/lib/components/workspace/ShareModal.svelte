@@ -75,37 +75,52 @@
   let collaborators = $state<Collaborator[]>([]);
   let inviteSuccess = $state(false);
 
+  const targetItem = $derived(folder || diagram);
+
   const shareUrl = $derived.by(() => {
-    if (!diagram || !diagram.shareToken || !diagram.isShared) return '';
-    if (typeof window === 'undefined') return `/share/${diagram.shareToken}`;
-    return `${window.location.origin}/share/${diagram.shareToken}`;
+    if (!targetItem || !targetItem.shareToken || !targetItem.isShared) return '';
+    if (typeof window === 'undefined') return `/share/${targetItem.shareToken}`;
+    return `${window.location.origin}/share/${targetItem.shareToken}`;
   });
 
   async function handleToggleShare() {
-    if (!diagram) return;
+    if (!targetItem) return;
     isSaving = true;
     errorMessage = null;
 
     try {
-      const nextIsShared = !diagram.isShared;
-      let nextToken = diagram.shareToken;
+      const nextIsShared = !targetItem.isShared;
+      let nextToken = targetItem.shareToken;
 
       if (nextIsShared && !nextToken) {
         nextToken = crypto.randomUUID();
       }
 
-      const { error } = await supabase
-        .from('diagrams')
-        .update({
-          is_shared: nextIsShared,
-          share_token: nextToken,
-          share_updated_at: new Date().toISOString()
-        })
-        .eq('id', diagram.id);
+      if (folder) {
+        const { error } = await supabase
+          .from('folders')
+          .update({
+            is_shared: nextIsShared,
+            share_token: nextToken,
+            share_updated_at: new Date().toISOString()
+          })
+          .eq('id', folder.id);
 
-      if (error) throw error;
+        if (error) throw error;
+        workspaceStore.updateFolderShareState(folder.id, nextIsShared, nextToken, collaborators.length);
+      } else if (diagram) {
+        const { error } = await supabase
+          .from('diagrams')
+          .update({
+            is_shared: nextIsShared,
+            share_token: nextToken,
+            share_updated_at: new Date().toISOString()
+          })
+          .eq('id', diagram.id);
 
-      workspaceStore.updateDiagramShareState(diagram.id, nextIsShared, nextToken);
+        if (error) throw error;
+        workspaceStore.updateDiagramShareState(diagram.id, nextIsShared, nextToken);
+      }
     } catch (err: any) {
       console.error('Failed to toggle share state:', err);
       errorMessage = err?.message || 'Failed to update share settings';
@@ -115,23 +130,35 @@
   }
 
   async function handleRegenerateToken() {
-    if (!diagram) return;
+    if (!targetItem) return;
     isSaving = true;
     errorMessage = null;
 
     try {
       const newToken = crypto.randomUUID();
-      const { error } = await supabase
-        .from('diagrams')
-        .update({
-          share_token: newToken,
-          share_updated_at: new Date().toISOString()
-        })
-        .eq('id', diagram.id);
+      if (folder) {
+        const { error } = await supabase
+          .from('folders')
+          .update({
+            share_token: newToken,
+            share_updated_at: new Date().toISOString()
+          })
+          .eq('id', folder.id);
 
-      if (error) throw error;
+        if (error) throw error;
+        workspaceStore.updateFolderShareState(folder.id, !!folder.isShared, newToken, collaborators.length);
+      } else if (diagram) {
+        const { error } = await supabase
+          .from('diagrams')
+          .update({
+            share_token: newToken,
+            share_updated_at: new Date().toISOString()
+          })
+          .eq('id', diagram.id);
 
-      workspaceStore.updateDiagramShareState(diagram.id, diagram.isShared, newToken);
+        if (error) throw error;
+        workspaceStore.updateDiagramShareState(diagram.id, diagram.isShared, newToken);
+      }
     } catch (err: any) {
       console.error('Failed to regenerate share token:', err);
       errorMessage = err?.message || 'Failed to regenerate link';
@@ -223,7 +250,7 @@
         if (error) throw error;
         const nextList = [...collaborators, { id: data?.id || crypto.randomUUID(), email: targetEmail, role: inviteRole }];
         collaborators = nextList;
-        workspaceStore.updateFolderShareState(folder.id, true, nextList.length);
+        workspaceStore.updateFolderShareState(folder.id, true, folder.shareToken, nextList.length);
       } else if (diagram) {
         const { data, error } = await supabase
           .from('diagram_collaborators')
@@ -254,7 +281,7 @@
         await supabase.from('folder_collaborators').delete().eq('id', id);
         const nextList = collaborators.filter((c) => c.id !== id);
         collaborators = nextList;
-        workspaceStore.updateFolderShareState(folder.id, nextList.length > 0, nextList.length);
+        workspaceStore.updateFolderShareState(folder.id, !!folder.isShared || nextList.length > 0, folder.shareToken, nextList.length);
       } else {
         await supabase.from('diagram_collaborators').delete().eq('id', id);
         collaborators = collaborators.filter((c) => c.id !== id);
@@ -339,39 +366,39 @@
           </div>
         {/if}
 
-        <!-- Toggle Public Access (For Diagram) -->
-        {#if diagram}
-          <div class="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <div>
-              <div class="text-sm font-semibold text-white">Public Link Access</div>
-              <div class="text-xs text-white/50 mt-0.5">
-                {diagram.isShared
-                  ? 'Anyone with the link can view this diagram in read-only mode'
-                  : 'Only you & invited collaborators can view'}
-              </div>
+        <!-- Toggle Public Access -->
+        <div class="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <div>
+            <div class="text-sm font-semibold text-white">Public Link Access</div>
+            <div class="text-xs text-white/50 mt-0.5">
+              {targetItem?.isShared
+                ? folder
+                  ? 'Anyone with the link can view all diagrams & sub-folders inside this folder'
+                  : 'Anyone with the link can view this diagram in read-only mode'
+                : 'Only you & invited collaborators can view'}
             </div>
-            <button
-              type="button"
-              onclick={handleToggleShare}
-              disabled={isSaving}
-              aria-label="Toggle Public Link Access"
-              class={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                diagram.isShared ? 'bg-emerald-500' : 'bg-white/20'
-              }`}
-              role="switch"
-              aria-checked={diagram.isShared}
-            >
-              <span
-                class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                  diagram.isShared ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              ></span>
-            </button>
           </div>
-        {/if}
+          <button
+            type="button"
+            onclick={handleToggleShare}
+            disabled={isSaving}
+            aria-label="Toggle Public Link Access"
+            class={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+              targetItem?.isShared ? 'bg-emerald-500' : 'bg-white/20'
+            }`}
+            role="switch"
+            aria-checked={targetItem?.isShared}
+          >
+            <span
+              class={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                targetItem?.isShared ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            ></span>
+          </button>
+        </div>
 
         <!-- Share URL Field (when enabled) -->
-        {#if diagram && diagram.isShared}
+        {#if targetItem?.isShared}
           <div class="space-y-2 animate-in fade-in duration-200">
             <label for="share-url-input" class="block text-xs font-semibold text-white/70">
               Shareable Web Link
@@ -418,55 +445,57 @@
               </button>
             </div>
 
-            <!-- Granular Link Permissions -->
-            <div class="p-3.5 rounded-xl border border-white/10 bg-white/[0.02] space-y-2.5 mt-3 font-['Instrument_Sans',sans-serif]">
-              <div class="text-[11px] font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">Link Permissions</div>
+            <!-- Granular Link Permissions (For Diagrams) -->
+            {#if diagram}
+              <div class="p-3.5 rounded-xl border border-white/10 bg-white/[0.02] space-y-2.5 mt-3 font-['Instrument_Sans',sans-serif]">
+                <div class="text-[11px] font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">Link Permissions</div>
 
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="text-xs font-semibold text-white">Allow Team Comments</div>
-                  <div class="text-[11px] text-white/40">Visitors can leave comments & annotations</div>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-xs font-semibold text-white">Allow Team Comments</div>
+                    <div class="text-[11px] text-white/40">Visitors can leave comments & annotations</div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Toggle Allow Team Comments"
+                    onclick={() => handleTogglePermission('allowComments')}
+                    class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${allowComments ? 'bg-emerald-500' : 'bg-white/20'}`}
+                  >
+                    <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${allowComments ? 'translate-x-4' : 'translate-x-0'}`}></span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  aria-label="Toggle Allow Team Comments"
-                  onclick={() => handleTogglePermission('allowComments')}
-                  class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${allowComments ? 'bg-emerald-500' : 'bg-white/20'}`}
-                >
-                  <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${allowComments ? 'translate-x-4' : 'translate-x-0'}`}></span>
-                </button>
-              </div>
 
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="text-xs font-semibold text-white">Allow Version Timeline</div>
-                  <div class="text-[11px] text-white/40">Visitors can inspect edit version history</div>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-xs font-semibold text-white">Allow Version Timeline</div>
+                    <div class="text-[11px] text-white/40">Visitors can inspect edit version history</div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Toggle Allow Version Timeline"
+                    onclick={() => handleTogglePermission('allowTimeline')}
+                    class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${allowTimeline ? 'bg-emerald-500' : 'bg-white/20'}`}
+                  >
+                    <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${allowTimeline ? 'translate-x-4' : 'translate-x-0'}`}></span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  aria-label="Toggle Allow Version Timeline"
-                  onclick={() => handleTogglePermission('allowTimeline')}
-                  class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${allowTimeline ? 'bg-emerald-500' : 'bg-white/20'}`}
-                >
-                  <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${allowTimeline ? 'translate-x-4' : 'translate-x-0'}`}></span>
-                </button>
-              </div>
 
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="text-xs font-semibold text-white">Allow 1-Click Forking</div>
-                  <div class="text-[11px] text-white/40">Logged-in visitors can clone to their workspace</div>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-xs font-semibold text-white">Allow 1-Click Forking</div>
+                    <div class="text-[11px] text-white/40">Logged-in visitors can clone to their workspace</div>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Toggle Allow 1-Click Forking"
+                    onclick={() => handleTogglePermission('allowForking')}
+                    class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${allowForking ? 'bg-emerald-500' : 'bg-white/20'}`}
+                  >
+                    <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${allowForking ? 'translate-x-4' : 'translate-x-0'}`}></span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  aria-label="Toggle Allow 1-Click Forking"
-                  onclick={() => handleTogglePermission('allowForking')}
-                  class={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${allowForking ? 'bg-emerald-500' : 'bg-white/20'}`}
-                >
-                  <span class={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white transition duration-200 ease-in-out ${allowForking ? 'translate-x-4' : 'translate-x-0'}`}></span>
-                </button>
               </div>
-            </div>
+            {/if}
           </div>
         {/if}
 

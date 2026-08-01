@@ -10,6 +10,8 @@ export const FolderSchema = z.object({
   organizationId: z.string().uuid().nullable().optional(),
   name: z.string().min(1, 'Folder name cannot be empty').max(255),
   isShared: z.boolean().default(false).optional(),
+  shareToken: z.string().uuid().nullable().optional(),
+  shareUpdatedAt: z.string().datetime().nullable().optional(),
   sharedCollaboratorCount: z.number().optional(),
   isDeleted: z.boolean().default(false),
   deletedAt: z.string().datetime().nullable().optional(),
