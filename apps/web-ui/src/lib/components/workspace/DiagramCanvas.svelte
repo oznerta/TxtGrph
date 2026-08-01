@@ -233,8 +233,8 @@
 
   // ============================================================================
   // PRODUCTION-GRADE NODE DRAG & EDGE ROUTING ENGINE
-  // Builds a graph model from SVG, computes border anchors, and generates
-  // fresh bezier curves on every frame for buttery-smooth interaction.
+  // Builds a graph model from SVG, resolves edge connections via CSS classes,
+  // and translates original path shapes on drag for smooth, natural movement.
   // ============================================================================
 
   interface GraphNode {
@@ -246,17 +246,18 @@
     height: number;
     tx: number;  // current translate X
     ty: number;  // current translate Y
-    bboxX: number; // local bbox offset x
-    bboxY: number; // local bbox offset y
+    bboxX: number;
+    bboxY: number;
+    origTx: number; // original translate X (at render time)
+    origTy: number;
   }
 
   interface GraphEdge {
     pathEl: SVGPathElement;
     sourceId: string;
     targetId: string;
-    labelEls: SVGElement[];  // edge labels, markers, etc.
-    markerEl: SVGElement | null; // arrowhead marker group
     originalD: string;
+    edgeGroupEl: Element | null;
   }
 
   // Drag state
@@ -276,28 +277,69 @@
   let graphEdges: GraphEdge[] = [];
 
   /**
-   * Parse the rendered SVG to build a complete graph model:
-   * - Discover all nodes with bounding boxes
-   * - Discover all edges and resolve their source/target node IDs
+   * Parse all coordinates from an SVG path d attribute.
+   * Returns array of {index, x, y} for each coordinate pair in the path.
+   */
+  function parsePathCoords(d: string): { pairs: Array<{ x: number; y: number }>; template: string } {
+    const pairs: Array<{ x: number; y: number }> = [];
+    // Match all number pairs after path commands
+    const template = d.replace(/([-\d.]+)[\s,]+([-\d.]+)/g, (_, xStr, yStr) => {
+      const x = parseFloat(xStr);
+      const y = parseFloat(yStr);
+      pairs.push({ x, y });
+      return `{{${pairs.length - 1}}}`;
+    });
+    return { pairs, template };
+  }
+
+  /**
+   * Rebuild a path d attribute from a template and coordinate pairs.
+   */
+  function rebuildPath(template: string, pairs: Array<{ x: number; y: number }>): string {
+    return template.replace(/\{\{(\d+)\}\}/g, (_, idxStr) => {
+      const idx = parseInt(idxStr);
+      const p = pairs[idx];
+      return `${p.x},${p.y}`;
+    });
+  }
+
+  /**
+   * Parse the rendered SVG to build a complete graph model.
+   * IMPORTANT: g.cluster (subgraph containers) are EXCLUDED from draggable nodes.
    */
   function buildGraphModel(svgEl: SVGSVGElement) {
     graphNodes.clear();
     graphEdges = [];
 
-    // 1. Discover all nodes
+    // 1. Discover individual nodes (NOT subgraph containers / clusters)
     const nodeEls = svgEl.querySelectorAll(
-      'g.node, g.entityBox, g.entity, g.cluster, g[id*="flowchart-"], g.actor, g.classGroup, g.stateGroup'
+      'g.node, g[id*="flowchart-"], g.actor, g.classGroup, g.stateGroup'
     );
 
+    // De-duplicate: a g[id*="flowchart-"] may also match g.node
+    const seen = new Set<Element>();
     nodeEls.forEach((el) => {
+      // Skip if this element is a child of another matched node
+      if (seen.has(el)) return;
+      // Skip cluster/subgraph containers
+      if (el.classList.contains('cluster')) return;
+      if (el.closest('g.cluster')) {
+        // If this node is INSIDE a cluster, it's still a valid draggable node
+        // but we should check it's not the cluster itself
+      }
+      seen.add(el);
+
       const gNode = el as SVGGElement;
       const nodeId = gNode.id || gNode.getAttribute('id') || '';
       if (!nodeId) return;
+      if (graphNodes.has(nodeId)) return; // already added
 
       let bbox = { x: 0, y: 0, width: 100, height: 60 };
       try {
         const b = gNode.getBBox();
-        bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
+        if (b.width > 0 && b.height > 0) {
+          bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
+        }
       } catch { /* fallback */ }
 
       const transformAttr = gNode.getAttribute('transform') || '';
@@ -314,207 +356,181 @@
         height: bbox.height,
         tx, ty,
         bboxX: bbox.x,
-        bboxY: bbox.y
+        bboxY: bbox.y,
+        origTx: tx,
+        origTy: ty
       });
     });
 
-    // 2. Discover all edges and resolve source/target nodes
-    const edgePaths = svgEl.querySelectorAll('path');
-    edgePaths.forEach((pathEl) => {
+    // 2. Discover edges via edgePath groups (Mermaid's standard structure)
+    // This is far more reliable than scanning all <path> elements
+    const edgeGroups = svgEl.querySelectorAll('g.edgePath, g.relationship, g.edge');
+    edgeGroups.forEach((group) => {
+      const pathEl = group.querySelector('path') as SVGPathElement | null;
+      if (!pathEl) return;
       const dAttr = pathEl.getAttribute('d');
       if (!dAttr || dAttr.trim().length < 5) return;
 
-      // Skip paths that are inside node shapes (rect outlines, etc.)
-      const closestNode = pathEl.closest('g.node, g.entityBox, g.entity, g.cluster, g.actor, g.classGroup, g.stateGroup');
-      if (closestNode) return; // This path belongs to a node shape, not an edge
+      const groupClass = group.getAttribute('class') || '';
+      const groupId = group.getAttribute('id') || '';
 
-      // Parse start and end points from the path
-      const startMatch = dAttr.match(/^M\s*([-\d.]+)[,\s]+([-\d.]+)/);
-      if (!startMatch) return;
-      const startX = parseFloat(startMatch[1]);
-      const startY = parseFloat(startMatch[2]);
-
-      // Find the last absolute coordinate pair in the path
-      let endX = startX, endY = startY;
-      const cmdRegex = /([MLCQSTZ])\s*([-\d.,\s]*)/gi;
-      let cmdMatch;
-      while ((cmdMatch = cmdRegex.exec(dAttr)) !== null) {
-        const cmd = cmdMatch[1].toUpperCase();
-        if (cmd === 'Z') continue;
-        const nums = cmdMatch[2].trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
-        if (nums.length >= 2) {
-          endX = nums[nums.length - 2];
-          endY = nums[nums.length - 1];
-        }
-      }
-
-      // Find source node (closest to start point) and target node (closest to end point)
       let sourceId = '';
       let targetId = '';
-      let minStartDist = Infinity;
-      let minEndDist = Infinity;
 
-      // Also check CSS classes for explicit edge-node links
-      const pathClass = pathEl.getAttribute('class') || '';
-      const pathId = pathEl.getAttribute('id') || '';
-      const parentGroup = pathEl.closest('g.edgePath, g.relationship, g.edge, g.edgePaths');
-      const parentId = parentGroup?.getAttribute('id') || '';
-
+      // Resolve via CSS classes: LS-<nodeId> and LE-<nodeId>
       graphNodes.forEach((node) => {
-        const rawId = node.id.replace(/^flowchart-/, '').replace(/^entity-/, '').replace(/-\d+$/, '');
-
-        // Check explicit CSS class links first
-        const isExplicitStart = pathClass.includes(`LS-${node.id}`) || pathClass.includes(`LS-${rawId}`) ||
-                               pathId.startsWith(`L-${node.id}`) || pathId.startsWith(`L-${rawId}`);
-        const isExplicitEnd = pathClass.includes(`LE-${node.id}`) || pathClass.includes(`LE-${rawId}`);
-
-        if (isExplicitStart) sourceId = node.id;
-        if (isExplicitEnd) targetId = node.id;
-
-        // Proximity-based fallback
-        const startDist = Math.hypot(startX - node.cx, startY - node.cy);
-        const endDist = Math.hypot(endX - node.cx, endY - node.cy);
-
-        if (startDist < minStartDist) { minStartDist = startDist; if (!sourceId) sourceId = node.id; }
-        if (endDist < minEndDist) { minEndDist = endDist; if (!targetId) targetId = node.id; }
+        const rawId = node.id.replace(/^flowchart-/, '').replace(/-\d+$/, '');
+        if (groupClass.includes(`LS-${node.id}`) || groupClass.includes(`LS-${rawId}`)) sourceId = node.id;
+        if (groupClass.includes(`LE-${node.id}`) || groupClass.includes(`LE-${rawId}`)) targetId = node.id;
       });
 
-      // Override proximity results with explicit class matches
+      // Fallback: parse path endpoints and find closest nodes by proximity
+      if (!sourceId || !targetId) {
+        const startMatch = dAttr.match(/^M\s*([-\d.]+)[,\s]+([-\d.]+)/);
+        if (!startMatch) return;
+        const startX = parseFloat(startMatch[1]);
+        const startY = parseFloat(startMatch[2]);
+
+        let endX = startX, endY = startY;
+        const allNums = dAttr.match(/[-\d.]+/g);
+        if (allNums && allNums.length >= 4) {
+          endX = parseFloat(allNums[allNums.length - 2]);
+          endY = parseFloat(allNums[allNums.length - 1]);
+        }
+
+        let minStartDist = Infinity;
+        let minEndDist = Infinity;
+
+        graphNodes.forEach((node) => {
+          const sd = Math.hypot(startX - node.cx, startY - node.cy);
+          const ed = Math.hypot(endX - node.cx, endY - node.cy);
+          if (!sourceId && sd < minStartDist) { minStartDist = sd; sourceId = node.id; }
+          if (!targetId && ed < minEndDist) { minEndDist = ed; targetId = node.id; }
+        });
+      }
+
+      if (!sourceId || !targetId) return;
+      if (sourceId === targetId) return; // self-loop — skip for now
+
+      graphEdges.push({
+        pathEl,
+        sourceId,
+        targetId,
+        originalD: dAttr,
+        edgeGroupEl: group
+      });
+    });
+
+    // 3. Also scan for standalone edge paths (ER diagrams, etc.)
+    // These aren't in edgePath groups but are direct children of the SVG root or relation groups
+    const standalonePaths = svgEl.querySelectorAll(':scope > g > path, g.relations > path, g.edgePaths > g > path');
+    standalonePaths.forEach((pathEl) => {
+      // Skip if already captured via edgePath groups
+      if (graphEdges.some(e => e.pathEl === pathEl)) return;
+
+      const dAttr = pathEl.getAttribute('d');
+      if (!dAttr || dAttr.trim().length < 5) return;
+
+      // Skip paths inside nodes
+      if (pathEl.closest('g.node, g.cluster, g.actor, g.classGroup')) return;
+
+      const pathClass = pathEl.getAttribute('class') || '';
+      let sourceId = '';
+      let targetId = '';
+
       graphNodes.forEach((node) => {
-        const rawId = node.id.replace(/^flowchart-/, '').replace(/^entity-/, '').replace(/-\d+$/, '');
+        const rawId = node.id.replace(/^flowchart-/, '').replace(/-\d+$/, '');
         if (pathClass.includes(`LS-${node.id}`) || pathClass.includes(`LS-${rawId}`)) sourceId = node.id;
         if (pathClass.includes(`LE-${node.id}`) || pathClass.includes(`LE-${rawId}`)) targetId = node.id;
       });
 
-      if (!sourceId || !targetId) return;
-      if (minStartDist > 500 && minEndDist > 500) return; // Too far from any node
+      if (!sourceId || !targetId) {
+        // Proximity fallback for ER-style paths
+        const startMatch = dAttr.match(/^M\s*([-\d.]+)[,\s]+([-\d.]+)/);
+        if (!startMatch) return;
+        const startX = parseFloat(startMatch[1]);
+        const startY = parseFloat(startMatch[2]);
 
-      // Collect edge labels
-      const labelEls: SVGElement[] = [];
-      let markerEl: SVGElement | null = null;
+        const allNums = dAttr.match(/[-\d.]+/g);
+        if (!allNums || allNums.length < 4) return;
+        const endX = parseFloat(allNums[allNums.length - 2]);
+        const endY = parseFloat(allNums[allNums.length - 1]);
 
-      if (parentGroup) {
-        parentGroup.querySelectorAll('.edgeLabel, .relationshipLabel, text, g.label, foreignObject').forEach(lbl => {
-          labelEls.push(lbl as SVGElement);
+        let minSD = Infinity, minED = Infinity;
+        graphNodes.forEach((node) => {
+          const sd = Math.hypot(startX - node.cx, startY - node.cy);
+          const ed = Math.hypot(endX - node.cx, endY - node.cy);
+          if (sd < minSD) { minSD = sd; sourceId = node.id; }
+          if (ed < minED) { minED = ed; targetId = node.id; }
         });
-        const marker = parentGroup.querySelector('marker, .arrowheadPath, polygon.arrowMarker');
-        if (marker) markerEl = marker as SVGElement;
+
+        if (minSD > 300 || minED > 300) return; // too far
       }
+
+      if (!sourceId || !targetId || sourceId === targetId) return;
 
       graphEdges.push({
         pathEl: pathEl as SVGPathElement,
         sourceId,
         targetId,
-        labelEls,
-        markerEl,
-        originalD: dAttr
+        originalD: dAttr,
+        edgeGroupEl: pathEl.parentElement
       });
     });
   }
 
   /**
-   * Compute the anchor point on a rectangular node border where an edge should connect.
-   * Given two node centers, returns the point on the border of `node` facing toward `otherCenter`.
-   */
-  function computeBorderAnchor(
-    node: GraphNode,
-    otherCx: number, otherCy: number
-  ): { x: number; y: number } {
-    const halfW = node.width / 2 + 4;  // small padding
-    const halfH = node.height / 2 + 4;
-    const dx = otherCx - node.cx;
-    const dy = otherCy - node.cy;
-
-    if (dx === 0 && dy === 0) {
-      return { x: node.cx, y: node.cy - halfH };
-    }
-
-    // Determine which edge of the rectangle the line to otherCenter exits through
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
-
-    if (absDx / halfW > absDy / halfH) {
-      // Exits left or right
-      const sign = dx > 0 ? 1 : -1;
-      const anchorX = node.cx + sign * halfW;
-      const anchorY = node.cy + dy * (halfW / absDx);
-      return { x: anchorX, y: anchorY };
-    } else {
-      // Exits top or bottom
-      const sign = dy > 0 ? 1 : -1;
-      const anchorX = node.cx + dx * (halfH / absDy);
-      const anchorY = node.cy + sign * halfH;
-      return { x: anchorX, y: anchorY };
-    }
-  }
-
-  /**
-   * Generate a smooth cubic bezier SVG path between two anchor points.
-   * Control points are offset along the primary direction for natural curves.
-   */
-  function generateEdgePath(
-    start: { x: number; y: number },
-    end: { x: number; y: number }
-  ): string {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dist = Math.hypot(dx, dy);
-    const curvature = Math.min(dist * 0.4, 80); // adaptive curvature
-
-    // Determine curve direction: prefer bending along the longer axis
-    let cp1x: number, cp1y: number, cp2x: number, cp2y: number;
-
-    if (Math.abs(dy) > Math.abs(dx)) {
-      // Primarily vertical connection
-      cp1x = start.x;
-      cp1y = start.y + (dy > 0 ? curvature : -curvature);
-      cp2x = end.x;
-      cp2y = end.y - (dy > 0 ? curvature : -curvature);
-    } else {
-      // Primarily horizontal connection
-      cp1x = start.x + (dx > 0 ? curvature : -curvature);
-      cp1y = start.y;
-      cp2x = end.x - (dx > 0 ? curvature : -curvature);
-      cp2y = end.y;
-    }
-
-    return `M ${start.x} ${start.y} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${end.x} ${end.y}`;
-  }
-
-  /**
-   * Update all edges connected to a given node.
-   * Recomputes anchors and generates fresh bezier curves.
+   * Update all edges connected to a given node by translating the original
+   * path coordinates. This preserves Mermaid's original curve shapes instead
+   * of generating artificial bezier curves.
    */
   function updateEdgesForNode(nodeId: string) {
     graphEdges.forEach((edge) => {
-      if (edge.sourceId !== nodeId && edge.targetId !== nodeId) return;
+      const isSource = edge.sourceId === nodeId;
+      const isTarget = edge.targetId === nodeId;
+      if (!isSource && !isTarget) return;
 
       const sourceNode = graphNodes.get(edge.sourceId);
       const targetNode = graphNodes.get(edge.targetId);
       if (!sourceNode || !targetNode) return;
 
-      // Compute border anchors
-      const startAnchor = computeBorderAnchor(sourceNode, targetNode.cx, targetNode.cy);
-      const endAnchor = computeBorderAnchor(targetNode, sourceNode.cx, sourceNode.cy);
+      // Calculate deltas from ORIGINAL positions
+      const srcDx = sourceNode.tx - sourceNode.origTx;
+      const srcDy = sourceNode.ty - sourceNode.origTy;
+      const tgtDx = targetNode.tx - targetNode.origTx;
+      const tgtDy = targetNode.ty - targetNode.origTy;
 
-      // Generate fresh bezier path
-      const newD = generateEdgePath(startAnchor, endAnchor);
+      // Parse original path into coordinate pairs
+      const { pairs, template } = parsePathCoords(edge.originalD);
+      if (pairs.length < 2) return;
+
+      // Create shifted pairs: interpolate between source and target deltas
+      // First pair gets source delta, last pair gets target delta,
+      // intermediate pairs get linearly interpolated deltas
+      const n = pairs.length;
+      const shifted = pairs.map((p, i) => {
+        const t = n > 1 ? i / (n - 1) : 0.5;
+        const dx = srcDx * (1 - t) + tgtDx * t;
+        const dy = srcDy * (1 - t) + tgtDy * t;
+        return { x: p.x + dx, y: p.y + dy };
+      });
+
+      const newD = rebuildPath(template, shifted);
       edge.pathEl.setAttribute('d', newD);
 
-      // Update edge labels to midpoint of the curve
-      if (edge.labelEls.length > 0) {
-        const midX = (startAnchor.x + endAnchor.x) / 2;
-        const midY = (startAnchor.y + endAnchor.y) / 2;
-        edge.labelEls.forEach((lbl) => {
-          if (lbl.getAttribute('transform') !== null) {
-            lbl.setAttribute('transform', `translate(${midX}, ${midY})`);
-          } else if (lbl.tagName === 'foreignObject' || lbl.tagName === 'text') {
-            const currentX = parseFloat(lbl.getAttribute('x') || '0');
-            const currentY = parseFloat(lbl.getAttribute('y') || '0');
-            const lblWidth = parseFloat(lbl.getAttribute('width') || '0');
-            const lblHeight = parseFloat(lbl.getAttribute('height') || '0');
-            lbl.setAttribute('x', String(midX - lblWidth / 2));
-            lbl.setAttribute('y', String(midY - lblHeight / 2));
+      // Update edge labels (inside edgePath groups)
+      if (edge.edgeGroupEl) {
+        const labels = edge.edgeGroupEl.querySelectorAll('.edgeLabel, g.label, foreignObject');
+        labels.forEach((lbl) => {
+          const tr = lbl.getAttribute('transform') || '';
+          const m = tr.match(/translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/);
+          if (m) {
+            const origLx = parseFloat(m[1]);
+            const origLy = parseFloat(m[2]);
+            // Labels sit at midpoint — use average delta
+            const avgDx = (srcDx + tgtDx) / 2;
+            const avgDy = (srcDy + tgtDy) / 2;
+            lbl.setAttribute('transform', `translate(${origLx + avgDx}, ${origLy + avgDy})`);
           }
         });
       }
