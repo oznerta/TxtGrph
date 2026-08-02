@@ -313,17 +313,6 @@
                 >
                   <Edit3 size={14} />
                 </button>
-                <button
-                  onclick={() => {
-                    const currentFolder = folders.find((f) => f.id === crumb.id);
-                    if (currentFolder) onShareFolder(currentFolder);
-                  }}
-                  title="Share folder"
-                  class="ml-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Share2 size={13} />
-                  <span>Share folder</span>
-                </button>
               </span>
             {:else}
               <button

@@ -456,16 +456,8 @@
 
                 <span class="text-white/30">/</span>
 
-                <span class="text-white font-bold inline-flex items-center gap-1.5">
-                  <span>{data.folder.name}</span>
-                  <button
-                    onclick={() => (shareModalOpen = true)}
-                    title="Share folder"
-                    class="ml-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  >
-                    <Share2 size={13} />
-                    <span>Share folder</span>
-                  </button>
+                <span class="text-white font-bold">
+                  {data.folder.name}
                 </span>
               </div>
 
@@ -483,6 +475,15 @@
                 <Check size={14} /> Forked to your workspace!
               </span>
             {/if}
+
+            <button
+              onclick={() => (shareModalOpen = true)}
+              class="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
+              title="Share folder"
+            >
+              <Share2 size={14} />
+              <span>Share folder</span>
+            </button>
 
             {#if data.allowForking}
               <button
