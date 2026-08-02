@@ -32,9 +32,11 @@
     Sparkles,
     Building2,
     User,
-    Users
+    Users,
+    Zap
   } from 'lucide-svelte';
   import { workspaceStore } from '$lib/stores/workspaceStore.svelte';
+  import ConnectAiModal from './ConnectAiModal.svelte';
 
   const scopeOptions: SelectOption[] = [
     { value: 'all', label: 'All files' },
@@ -103,6 +105,7 @@
   let viewMode = $state<'grid' | 'list'>('grid');
   let filterScope = $state<'all' | 'recents' | 'favorites' | 'shared'>('all');
   let sortOption = $state<'modified' | 'name'>('modified');
+  let isConnectAiModalOpen = $state(false);
 
   // Multi-Selection State (Folders + Diagrams)
   let selectedDiagramIds = $state<Set<string>>(new Set());
@@ -362,6 +365,15 @@
           <ChevronDown class="w-3.5 h-3.5 text-black/60" />
         </button>
       </div>
+
+      <button
+        onclick={() => (isConnectAiModalOpen = true)}
+        title="Connect ChatGPT, Claude, Gemini, or Cursor"
+        class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
+      >
+        <Zap class="w-4 h-4 text-amber-400" />
+        <span class="hidden sm:inline">Connect AI Chat</span>
+      </button>
 
       <button
         onclick={() => onCreateFolder(activeFolderId)}
@@ -853,4 +865,6 @@
     onclose={() => (moveModalOpen = false)}
     onMove={handleConfirmMove}
   />
+
+  <ConnectAiModal bind:isOpen={isConnectAiModalOpen} />
 </div>

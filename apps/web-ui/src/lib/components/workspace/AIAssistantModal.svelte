@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Sparkles, Loader2, Play, Check, X, Settings, Cpu, Wrench, RefreshCw, Lightbulb, HelpCircle, ArrowRight } from 'lucide-svelte';
+  import { Sparkles, Loader2, Play, Check, X, Settings, Cpu, Wrench, RefreshCw, Lightbulb, HelpCircle, ArrowRight, Zap } from 'lucide-svelte';
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { decryptApiKey } from '$lib/crypto';
   import { AIRouter, type AIProvider } from '@txtgrph/ai-router';
   import type { UserKeyRecord } from '../../../routes/settings/+page.js';
   import CustomSelect, { type SelectOption } from '$lib/components/ui/CustomSelect.svelte';
+  import ConnectAiModal from './ConnectAiModal.svelte';
 
   interface Props {
     isOpen?: boolean;
@@ -33,6 +34,7 @@
   let streamedText = $state('');
   let sanitizedCode = $state('');
   let errorMessage = $state('');
+  let isConnectAiOpen = $state(false);
 
   let providerOptions = $derived.by<SelectOption[]>(() => {
     return userKeys.map((k) => ({
@@ -389,16 +391,26 @@
               <RefreshCw class="w-3.5 h-3.5" /> Start Over / Try Another
             </button>
           {:else}
-            <button
-              type="button"
-              onclick={() => {
-                handleClose();
-                onOpenSettings();
-              }}
-              class="text-xs text-white/50 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Settings class="w-3.5 h-3.5" /> Key Settings
-            </button>
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                onclick={() => {
+                  handleClose();
+                  onOpenSettings();
+                }}
+                class="text-xs text-white/50 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Settings class="w-3.5 h-3.5" /> Key Settings
+              </button>
+
+              <button
+                type="button"
+                onclick={() => (isConnectAiOpen = true)}
+                class="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1.5 transition-colors cursor-pointer font-bold"
+              >
+                <Zap class="w-3.5 h-3.5" /> Connect ChatGPT / Gemini / Claude
+              </button>
+            </div>
           {/if}
 
           <div class="flex items-center gap-2">
@@ -445,3 +457,5 @@
     </div>
   </div>
 {/if}
+
+<ConnectAiModal bind:isOpen={isConnectAiOpen} />
