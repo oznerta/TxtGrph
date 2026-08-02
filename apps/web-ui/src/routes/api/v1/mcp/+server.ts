@@ -21,13 +21,7 @@ export const OPTIONS: RequestHandler = async () => {
 export const GET: RequestHandler = async (event) => {
   const supabase = createSupabaseServerClient(event);
   const authUser = await authenticateMcpRequest(event.request, supabase);
-
-  if (!authUser) {
-    return json(
-      { success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or missing Bearer token' } },
-      { status: 401, headers: corsHeaders }
-    );
-  }
+  const origin = event.url.origin;
 
   return json(
     {
@@ -37,7 +31,14 @@ export const GET: RequestHandler = async (event) => {
         version: '0.1.0',
         protocolVersion: '2024-11-05',
         capabilities: {
-          tools: {}
+          tools: {},
+          auth: {
+            type: 'oauth2',
+            issuer: origin,
+            authorization_endpoint: `${origin}/api/v1/oauth/authorize`,
+            token_endpoint: `${origin}/api/v1/oauth/token`,
+            userinfo_endpoint: `${origin}/api/v1/oauth/userinfo`
+          }
         },
         tools: TOOL_DEFINITIONS,
       },
@@ -54,7 +55,7 @@ export const POST: RequestHandler = async (event) => {
     return json(
       {
         jsonrpc: '2.0',
-        error: { code: -32001, message: 'Unauthorized: Invalid or missing Bearer API Token' },
+        error: { code: -32001, message: 'Unauthorized: Invalid or missing Bearer API Token or OAuth credentials' },
         id: null
       },
       { status: 401, headers: corsHeaders }
@@ -75,7 +76,13 @@ export const POST: RequestHandler = async (event) => {
             jsonrpc: '2.0',
             result: {
               protocolVersion: '2024-11-05',
-              capabilities: { tools: {} },
+              capabilities: {
+                tools: {},
+                auth: {
+                  type: 'oauth2',
+                  token_endpoint: `${event.url.origin}/api/v1/oauth/token`
+                }
+              },
               serverInfo: { name: 'txtgrph-mcp-server', version: '0.1.0' }
             },
             id: requestId
