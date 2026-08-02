@@ -20,6 +20,10 @@ export const GET: RequestHandler = async (event) => {
     data: {
       server: 'txtgrph-mcp-server',
       version: '0.1.0',
+      protocolVersion: '2024-11-05',
+      capabilities: {
+        tools: {}
+      },
       tools: TOOL_DEFINITIONS,
     },
   });
@@ -31,18 +35,86 @@ export const POST: RequestHandler = async (event) => {
 
   if (!authUser) {
     return json(
-      { success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or missing Bearer token' } },
+      {
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized: Invalid or missing Bearer API Token' },
+        id: null
+      },
       { status: 401 }
     );
   }
 
   try {
     const body = await event.request.json();
-    const { name, arguments: toolArgs } = body;
+    const requestId = body?.id ?? null;
 
+    // Handle JSON-RPC 2.0 protocol requests (initialize, ping, tools/list, tools/call)
+    if (body?.jsonrpc === '2.0' || body?.method) {
+      const method = body.method;
+
+      if (method === 'initialize') {
+        return json({
+          jsonrpc: '2.0',
+          result: {
+            protocolVersion: '2024-11-05',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'txtgrph-mcp-server', version: '0.1.0' }
+          },
+          id: requestId
+        });
+      }
+
+      if (method === 'ping') {
+        return json({ jsonrpc: '2.0', result: {}, id: requestId });
+      }
+
+      if (method === 'tools/list') {
+        return json({
+          jsonrpc: '2.0',
+          result: { tools: TOOL_DEFINITIONS },
+          id: requestId
+        });
+      }
+
+      if (method === 'tools/call') {
+        const toolName = body.params?.name;
+        const toolArgs = body.params?.arguments || {};
+        if (!toolName) {
+          return json({
+            jsonrpc: '2.0',
+            error: { code: -32602, message: 'Invalid params: Missing tool name' },
+            id: requestId
+          }, { status: 400 });
+        }
+
+        const result = await handleMcpToolCall(toolName, toolArgs, supabase, authUser.userId);
+        if (result.isError) {
+          return json({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: result.content[0]?.text || 'Tool execution failed' },
+            id: requestId
+          });
+        }
+
+        return json({
+          jsonrpc: '2.0',
+          result: { content: result.content },
+          id: requestId
+        });
+      }
+
+      return json({
+        jsonrpc: '2.0',
+        error: { code: -32601, message: `Method not found: ${method}` },
+        id: requestId
+      }, { status: 404 });
+    }
+
+    // Direct REST tool call format fallback ({ name, arguments })
+    const { name, arguments: toolArgs } = body;
     if (!name || typeof name !== 'string') {
       return json(
-        { success: false, error: { code: 'BAD_REQUEST', message: 'Missing tool name' } },
+        { success: false, error: { code: 'BAD_REQUEST', message: 'Missing tool name or method' } },
         { status: 400 }
       );
     }

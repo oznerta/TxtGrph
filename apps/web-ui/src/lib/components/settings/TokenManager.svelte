@@ -1,6 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { KeyRound, Plus, Trash2, Copy, Check, Loader2, Server, Terminal, Code2, ShieldCheck, X } from 'lucide-svelte';
+  import {
+    KeyRound,
+    Plus,
+    Trash2,
+    Copy,
+    Check,
+    Loader2,
+    Server,
+    Terminal,
+    Code2,
+    ShieldCheck,
+    X,
+    Sparkles,
+    Globe,
+    Cpu,
+    ExternalLink,
+    Info,
+    CheckCircle2
+  } from 'lucide-svelte';
 
   interface McpTokenRecord {
     id: string;
@@ -16,6 +34,9 @@
   let isLoading = $state(true);
   let errorMsg = $state('');
 
+  // Host Base URL
+  let baseUrl = $state('http://localhost:5173');
+
   // Modal State
   let isCreateModalOpen = $state(false);
   let newTokenName = $state('');
@@ -23,8 +44,8 @@
   let createdRawToken = $state<string | null>(null);
   let isCopied = $state(false);
 
-  // Guide Snippet Tab State
-  let activeGuideTab = $state<'claude' | 'cursor'>('claude');
+  // Platform Guide Snippet Tab State
+  let activeGuideTab = $state<'claude' | 'cursor' | 'chatgpt' | 'gemini'>('claude');
   let isSnippetCopied = $state(false);
 
   async function fetchTokens() {
@@ -45,11 +66,14 @@
   }
 
   onMount(() => {
+    if (typeof window !== 'undefined') {
+      baseUrl = window.location.origin;
+    }
     fetchTokens();
   });
 
   function openCreateModal() {
-    newTokenName = 'Cursor / MCP Token';
+    newTokenName = 'MCP AI Token';
     createdRawToken = null;
     isCopied = false;
     isCreateModalOpen = true;
@@ -112,35 +136,66 @@
     }, 2000);
   }
 
+  const activeTokenDisplay = $derived(
+    createdRawToken || (tokens.length > 0 ? `${tokens[0].token_prefix}...` : 'txtgrph_mcp_YOUR_API_KEY')
+  );
+
   let claudeSnippet = $derived(`{
   "mcpServers": {
     "txtgrph": {
       "command": "npx",
       "args": ["-y", "@txtgrph/mcp-server"],
       "env": {
-        "TXTGRPH_API_KEY": "${tokens[0]?.token_prefix || 'txtg_live_...'}",
-        "TXTGRPH_BASE_URL": "http://localhost:5173"
+        "TXTGRPH_API_KEY": "${activeTokenDisplay}",
+        "TXTGRPH_BASE_URL": "${baseUrl}"
       }
     }
   }
 }`);
 
   let cursorSnippet = $derived(`{
-  "mcp": {
-    "servers": {
-      "txtgrph": {
-        "url": "http://localhost:5173/api/mcp",
-        "headers": {
-          "Authorization": "Bearer ${tokens[0]?.token_prefix || 'txtg_live_...'}"
-        }
+  "mcpServers": {
+    "txtgrph": {
+      "url": "${baseUrl}/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer ${activeTokenDisplay}"
       }
     }
   }
 }`);
 
+  let chatGptSnippet = $derived(`OpenAPI Spec URL: ${baseUrl}/api/v1/openapi.json
+Authentication Type: Bearer Token
+Authorization Header: Bearer ${activeTokenDisplay}
+
+Supported Actions:
+- list_diagrams (List your diagrams & code)
+- create_diagram (Generate new Mermaid diagram)
+- update_diagram (Update existing diagram)
+- list_folders / create_folder (Manage workspace structure)
+- render_mermaid_svg (Validate & sanitize syntax)`);
+
+  let geminiSnippet = $derived(`JSON-RPC 2.0 Endpoint: ${baseUrl}/api/v1/mcp
+Headers:
+  Authorization: Bearer ${activeTokenDisplay}
+  Content-Type: application/json
+
+Supported Standard Protocol Methods:
+- initialize (Protocol handshake)
+- tools/list (Retrieve available tools)
+- tools/call (Execute diagram & folder actions)`);
+
+  function getCurrentSnippet() {
+    switch (activeGuideTab) {
+      case 'claude': return claudeSnippet;
+      case 'cursor': return cursorSnippet;
+      case 'chatgpt': return chatGptSnippet;
+      case 'gemini': return geminiSnippet;
+    }
+  }
+
   function copySnippet() {
-    const text = activeGuideTab === 'claude' ? claudeSnippet : cursorSnippet;
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(getCurrentSnippet());
     isSnippetCopied = true;
     setTimeout(() => {
       isSnippetCopied = false;
@@ -157,14 +212,17 @@
   }
 </script>
 
-<div class="space-y-6 w-full">
+<div class="space-y-6 w-full font-['Instrument_Sans',sans-serif]">
   <!-- Tokens List Card -->
-  <div class="p-6 rounded-3xl bg-[#0F111A] border border-white/10 space-y-5">
+  <div class="p-6 rounded-3xl bg-[#0F111A] border border-white/10 space-y-5 shadow-xl">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h3 class="text-sm font-bold text-white">Personal Access Tokens</h3>
+        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+          <KeyRound size={16} class="text-amber-400" />
+          <span>Personal Access Tokens (MCP Keys)</span>
+        </h3>
         <p class="text-xs text-white/50 mt-0.5">
-          Tokens grant access to REST API endpoints and Model Context Protocol (MCP) servers.
+          Generate API keys to connect Claude Desktop, Gemini, ChatGPT, Cursor, VS Code, or custom AI agents to TxtGrph.
         </p>
       </div>
       <button
@@ -172,7 +230,7 @@
         class="px-4 py-2 text-xs font-bold rounded-xl bg-amber-400 hover:bg-amber-300 text-black transition-colors shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
       >
         <Plus size={14} />
-        <span>Generate New Token</span>
+        <span>Generate New Key</span>
       </button>
     </div>
 
@@ -187,9 +245,9 @@
       </div>
     {:else if tokens.length === 0}
       <div class="p-8 text-center border border-dashed border-white/10 rounded-2xl space-y-2 bg-white/[0.01]">
-        <div class="text-xs font-bold text-white">No Personal Access Tokens Generated</div>
+        <div class="text-xs font-bold text-white">No Access Tokens Created</div>
         <p class="text-xs text-white/40 max-w-sm mx-auto">
-          Create an access token to connect Claude Desktop, Cursor, or your own agents to TxtGrph.
+          Create an API key to enable AI agents (Claude, Gemini, ChatGPT, Cursor) to view and create diagrams directly in your account.
         </p>
       </div>
     {:else}
@@ -197,17 +255,20 @@
         <table class="w-full text-left text-xs font-['IBM_Plex_Mono',monospace]">
           <thead class="bg-white/[0.04] text-white/60 border-b border-white/10 font-bold">
             <tr>
-              <th class="py-3 px-4">Label</th>
+              <th class="py-3 px-4">Key Description</th>
               <th class="py-3 px-4">Prefix</th>
               <th class="py-3 px-4">Created</th>
-              <th class="py-3 px-4">Last Used</th>
+              <th class="py-3 px-4">Last Active</th>
               <th class="py-3 px-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-white/5">
             {#each tokens as token}
               <tr class="hover:bg-white/[0.02] transition-colors">
-                <td class="py-3 px-4 font-bold text-white">{token.name}</td>
+                <td class="py-3 px-4 font-bold text-white flex items-center gap-2">
+                  <ShieldCheck size={14} class="text-amber-400 shrink-0" />
+                  <span>{token.name}</span>
+                </td>
                 <td class="py-3 px-4 text-amber-400">{token.token_prefix}...</td>
                 <td class="py-3 px-4 text-white/50">{formatDate(token.created_at)}</td>
                 <td class="py-3 px-4 text-white/50">{formatDate(token.last_used_at)}</td>
@@ -216,7 +277,7 @@
                     onclick={() => handleRevokeToken(token.id, token.name)}
                     class="text-xs text-red-400 hover:text-red-300 font-bold transition-colors cursor-pointer"
                   >
-                    Revoke
+                    Revoke Key
                   </button>
                 </td>
               </tr>
@@ -227,48 +288,92 @@
     {/if}
   </div>
 
-  <!-- Interactive MCP Setup Guide Card -->
-  <div class="p-6 rounded-3xl bg-[#0F111A] border border-white/10 space-y-4">
-    <div class="flex items-center justify-between">
+  <!-- Production-Grade Multi-Platform MCP Setup Guide -->
+  <div class="p-6 rounded-3xl bg-[#0F111A] border border-white/10 space-y-5 shadow-xl">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div class="flex items-center gap-2.5">
-        <Server size={18} class="text-amber-400" />
-        <h4 class="text-xs font-bold text-white uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">MCP Agent Integration Snippets</h4>
+        <Cpu size={18} class="text-amber-400 shrink-0" />
+        <div>
+          <h4 class="text-xs font-bold text-white uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">MCP & AI Platform Integration Setup</h4>
+          <p class="text-[11px] text-white/50">Production-ready configurations for your favorite AI tools.</p>
+        </div>
       </div>
 
-      <div class="flex items-center gap-1 p-1 rounded-xl bg-black/40 border border-white/10 font-['IBM_Plex_Mono',monospace]">
+      <!-- Platform Selector Tabs -->
+      <div class="flex items-center gap-1 p-1 rounded-xl bg-black/40 border border-white/10 font-['IBM_Plex_Mono',monospace] overflow-x-auto">
         <button
           onclick={() => (activeGuideTab = 'claude')}
-          class="px-3 py-1 text-[11px] font-bold rounded-lg transition-colors cursor-pointer {activeGuideTab === 'claude' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
+          class="px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer shrink-0 {activeGuideTab === 'claude' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
         >
           Claude Desktop
         </button>
         <button
           onclick={() => (activeGuideTab = 'cursor')}
-          class="px-3 py-1 text-[11px] font-bold rounded-lg transition-colors cursor-pointer {activeGuideTab === 'cursor' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
+          class="px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer shrink-0 {activeGuideTab === 'cursor' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
         >
           Cursor / VS Code
+        </button>
+        <button
+          onclick={() => (activeGuideTab = 'chatgpt')}
+          class="px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer shrink-0 {activeGuideTab === 'chatgpt' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
+        >
+          ChatGPT GPTs
+        </button>
+        <button
+          onclick={() => (activeGuideTab = 'gemini')}
+          class="px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer shrink-0 {activeGuideTab === 'gemini' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
+        >
+          Gemini / Agents
         </button>
       </div>
     </div>
 
+    <!-- Code Snippet Container -->
     <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3">
       <div class="flex items-center justify-between text-xs text-white/60 font-['IBM_Plex_Mono',monospace]">
-        <span>Config File: {activeGuideTab === 'claude' ? 'claude_desktop_config.json' : 'mcp.json'}</span>
+        <div class="flex items-center gap-2">
+          <Terminal size={14} class="text-amber-400" />
+          <span>
+            {#if activeGuideTab === 'claude'}
+              Config File: <code class="text-amber-300">claude_desktop_config.json</code>
+            {:else if activeGuideTab === 'cursor'}
+              Config File: <code class="text-amber-300">.cursor/mcp.json</code> or VS Code Settings
+            {:else if activeGuideTab === 'chatgpt'}
+              OpenAPI Action Config (<a href={`${baseUrl}/api/v1/openapi.json`} target="_blank" class="text-amber-400 underline inline-flex items-center gap-0.5">Open Spec <ExternalLink size={10} /></a>)
+            {:else}
+              JSON-RPC 2.0 Standard MCP Protocol Endpoint
+            {/if}
+          </span>
+        </div>
+
         <button
           onclick={copySnippet}
-          class="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+          class="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
         >
           {#if isSnippetCopied}
             <Check size={13} class="text-emerald-400" />
             <span class="text-emerald-400">Copied!</span>
           {:else}
             <Copy size={13} />
-            <span>Copy Snippet</span>
+            <span>Copy Configuration</span>
           {/if}
         </button>
       </div>
 
-      <pre class="text-[12px] leading-[22px] font-['IBM_Plex_Mono',monospace] text-amber-300 whitespace-pre font-mono p-3.5 rounded-xl bg-black/60 border border-white/5 select-all overflow-x-auto">{activeGuideTab === 'claude' ? claudeSnippet : cursorSnippet}</pre>
+      <pre class="text-[12px] leading-[22px] font-['IBM_Plex_Mono',monospace] text-amber-300 whitespace-pre font-mono p-4 rounded-xl bg-black/60 border border-white/5 select-all overflow-x-auto">{getCurrentSnippet()}</pre>
+    </div>
+
+    <!-- Instructions Banner -->
+    <div class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 text-xs text-white/70 leading-relaxed space-y-1 font-['Instrument_Sans',sans-serif]">
+      {#if activeGuideTab === 'claude'}
+        <p><strong class="text-white">How to connect Claude Desktop:</strong> Open Claude Settings → Developer → Edit Config. Paste the JSON snippet above into your <code class="text-amber-300 font-mono">claude_desktop_config.json</code> file and restart Claude.</p>
+      {:else if activeGuideTab === 'cursor'}
+        <p><strong class="text-white">How to connect Cursor / VS Code / Windsurf:</strong> Add the MCP server configuration into your project's <code class="text-amber-300 font-mono">.cursor/mcp.json</code> or global Cursor MCP settings.</p>
+      {:else if activeGuideTab === 'chatgpt'}
+        <p><strong class="text-white">How to connect ChatGPT Custom GPTs:</strong> In ChatGPT GPT Builder → Actions → Import from URL, paste <code class="text-amber-300 font-mono">{baseUrl}/api/v1/openapi.json</code>. Set Authentication to Bearer API Token.</p>
+      {:else}
+        <p><strong class="text-white">How to connect Gemini & Custom AI Frameworks:</strong> Point your agent's MCP transport to <code class="text-amber-300 font-mono">{baseUrl}/api/v1/mcp</code> using HTTP Bearer authorization headers.</p>
+      {/if}
     </div>
   </div>
 </div>
@@ -296,7 +401,7 @@
               id="token-name-input"
               type="text"
               bind:value={newTokenName}
-              placeholder="e.g. Cursor MCP Token"
+              placeholder="e.g. Claude Desktop / Gemini Token"
               class="w-full px-4 py-3 text-xs rounded-2xl border border-white/15 bg-[#07080C] text-white focus:outline-none focus:border-amber-400 font-['IBM_Plex_Mono',monospace]"
             />
           </div>

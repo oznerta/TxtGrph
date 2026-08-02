@@ -73,6 +73,18 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: 'create_folder',
+    description: 'Create a new diagram folder.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the folder.' },
+        parent_id: { type: 'string', description: 'Optional parent folder UUID for nested folders.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
     name: 'render_mermaid_svg',
     description: 'Sanitize and validate a Mermaid diagram code string.',
     inputSchema: {
@@ -215,6 +227,26 @@ export async function handleMcpToolCall(
 
         return {
           content: [{ type: 'text', text: JSON.stringify(data || [], null, 2) }],
+        };
+      }
+
+      case 'create_folder': {
+        if (!args?.name) throw new Error('Missing required param: name');
+        const { data, error } = await supabase
+          .from('folders')
+          .insert({
+            user_id: userId,
+            name: args.name.trim(),
+            parent_id: args.parent_id || null,
+            is_deleted: false
+          })
+          .select('id, name, parent_id, created_at, updated_at')
+          .single();
+
+        if (error) throw new Error(error.message);
+
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
         };
       }
 
