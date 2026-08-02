@@ -1,4 +1,5 @@
-import { GET as handleAuthorizeGet, OPTIONS as handleAuthorizeOptions } from '../../api/v1/oauth/authorize/+server';
+import { GET as handleGet, POST as handlePost, OPTIONS as handleOptions } from '../../api/v1/oauth/authorize/+server';
 
-export const OPTIONS = handleAuthorizeOptions;
-export const GET = handleAuthorizeGet;
+export const OPTIONS = handleOptions;
+export const GET = handleGet;
+export const POST = handlePost;
