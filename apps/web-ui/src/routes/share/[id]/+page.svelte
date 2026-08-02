@@ -3,6 +3,8 @@
   import { goto } from '$app/navigation';
   import type { PageData } from './$types';
   import DiagramCanvas from '$lib/components/workspace/DiagramCanvas.svelte';
+  import DiagramCard from '$lib/components/workspace/DiagramCard.svelte';
+  import CustomSelect, { type SelectOption } from '$lib/components/ui/CustomSelect.svelte';
   import VersionHistoryModal from '$lib/components/workspace/VersionHistoryModal.svelte';
   import CommentsModal from '$lib/components/workspace/CommentsModal.svelte';
   import AdvancedExportModal from '$lib/components/workspace/AdvancedExportModal.svelte';
@@ -38,8 +40,22 @@
     LayoutDashboard,
     Menu,
     Settings,
-    Heart
+    Heart,
+    Plus,
+    Sparkles,
+    X
   } from 'lucide-svelte';
+
+  const scopeOptions: SelectOption[] = [
+    { value: 'all', label: 'All files' },
+    { value: 'recents', label: 'Recently opened' },
+    { value: 'favorites', label: 'Favorites' }
+  ];
+
+  const sortOptions: SelectOption[] = [
+    { value: 'modified', label: 'Last modified' },
+    { value: 'name', label: 'Name' }
+  ];
 
   let { data }: { data: PageData } = $props();
   const supabase = createSupabaseBrowserClient();
@@ -47,11 +63,15 @@
   let code = $state(data.type === 'diagram' ? data.diagram.code : '');
   let title = $state(data.type === 'diagram' ? data.diagram.title : '');
   let saveStatus = $state<'idle' | 'saving' | 'saved' | 'unsaved' | 'error'>('saved');
-  let isFavorite = $state(false);
 
-  // Gallery view controls
+  // Favorites tracking set
+  let favoriteIds = $state<Set<string>>(new Set());
+
+  // Gallery view controls & filters
   let searchQuery = $state('');
   let viewMode = $state<'grid' | 'list'>('grid');
+  let filterScope = $state<'all' | 'recents' | 'favorites'>('all');
+  let sortOption = $state<'modified' | 'name'>('modified');
   let sidebarOpen = $state(true);
 
   // Expanded Tree Folder IDs
@@ -96,6 +116,16 @@
     expandedFolderIds = next;
   }
 
+  function toggleFavorite(id: string) {
+    const next = new Set(favoriteIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    favoriteIds = next;
+  }
+
   function getChildFolders(parentId: string) {
     if (!data.treeFolders) return [];
     return data.treeFolders.filter((f: any) => f.parentId === parentId);
@@ -104,6 +134,11 @@
   function getFolderDiagrams(folderId: string) {
     if (!data.allTreeDiagrams) return [];
     return data.allTreeDiagrams.filter((d: any) => d.folderId === folderId);
+  }
+
+  function getSubFolderDiagramCount(folderId: string): number {
+    if (!data.allTreeDiagrams) return 0;
+    return data.allTreeDiagrams.filter((d: any) => d.folderId === folderId).length;
   }
 
   let topLevelTreeFolders = $derived.by(() => {
@@ -173,8 +208,11 @@
     }
   }
 
-  async function handleForkDiagram() {
-    if (!data.isLoggedIn || data.type !== 'diagram') {
+  async function handleForkDiagram(diagramToFork?: any) {
+    const targetDiagram = diagramToFork || (data.type === 'diagram' ? data.diagram : null);
+    if (!targetDiagram) return;
+
+    if (!data.isLoggedIn) {
       goto('/auth/login');
       return;
     }
@@ -186,9 +224,9 @@
       const { error } = await supabase.from('diagrams').insert({
         id: diagramId,
         user_id: userId,
-        title: `${data.diagram.title} (Forked)`,
-        code: data.diagram.code,
-        config: data.diagram.config || {},
+        title: `${targetDiagram.title} (Forked)`,
+        code: targetDiagram.code,
+        config: targetDiagram.config || {},
         is_shared: false
       });
 
@@ -201,19 +239,36 @@
     }
   }
 
-  // Filtered sub-folders and diagrams for gallery view
+  // Filtered and sorted sub-folders and diagrams for gallery view
   let filteredSubFolders = $derived.by(() => {
     if (!data.subFolders) return [];
-    if (!searchQuery.trim()) return data.subFolders;
-    const q = searchQuery.toLowerCase();
-    return data.subFolders.filter((f: any) => f.name.toLowerCase().includes(q));
+    let list = data.subFolders;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((f: any) => f.name.toLowerCase().includes(q));
+    }
+    return list;
   });
 
-  let filteredDiagrams = $derived.by(() => {
+  let sortedFilteredDiagrams = $derived.by(() => {
     if (!data.diagrams) return [];
-    if (!searchQuery.trim()) return data.diagrams;
-    const q = searchQuery.toLowerCase();
-    return data.diagrams.filter((d: any) => d.title.toLowerCase().includes(q) || d.code.toLowerCase().includes(q));
+    let list = data.diagrams;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter((d: any) => d.title.toLowerCase().includes(q) || (d.code && d.code.toLowerCase().includes(q)));
+    }
+
+    if (filterScope === 'favorites') {
+      list = list.filter((d: any) => favoriteIds.has(d.id));
+    }
+
+    return list.slice().sort((a: any, b: any) => {
+      if (sortOption === 'name') {
+        return a.title.localeCompare(b.title);
+      }
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
   });
 </script>
 
@@ -224,7 +279,7 @@
   {@const isCurrentFolder = data.type === 'folder' && data.folder?.id === folder.id}
 
   <div class="space-y-0.5">
-    <div class="group relative flex items-center justify-between px-2 py-1.5 rounded-xl cursor-pointer transition-all {isCurrentFolder ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold shadow-sm' : 'text-white/70 hover:bg-white/10 hover:text-white'}">
+    <div class="group relative flex items-center justify-between px-2.5 py-1.5 rounded-full cursor-pointer transition-all {isCurrentFolder ? 'bg-amber-500/15 text-amber-300 border border-amber-500/50 font-bold shadow-sm' : 'text-white/70 hover:bg-white/10 hover:text-white'}">
       <a
         href={`/share/${folder.shareToken || folder.id}`}
         onclick={() => toggleFolderExpand(folder.id)}
@@ -232,18 +287,18 @@
       >
         {#if subFolders.length > 0 || diagrams.length > 0}
           {#if isExpanded}
-            <ChevronDown size={13} class="shrink-0 text-white/50" />
+            <ChevronDown size={13} class="shrink-0 text-amber-400" />
             <FolderOpen size={14} class="shrink-0 text-amber-400" />
           {:else}
-            <ChevronRight size={13} class="shrink-0 text-white/50" />
-            <FolderIcon size={14} class="shrink-0 text-amber-400/70" />
+            <ChevronRight size={13} class="shrink-0 text-amber-400" />
+            <FolderIcon size={14} class="shrink-0 text-amber-400" />
           {/if}
         {:else}
-          <FolderIcon size={14} class="shrink-0 text-amber-400/70 ml-4" />
+          <FolderIcon size={14} class="shrink-0 text-amber-400 ml-4" />
         {/if}
-        <span class="truncate font-medium text-xs">{folder.name}</span>
+        <span class="truncate font-medium text-xs {isCurrentFolder ? 'text-amber-300 font-bold' : ''}">{folder.name}</span>
         {#if folder.isShared}
-          <span class="ml-1 inline-flex items-center gap-0.5 rounded bg-sky-500/20 px-1 py-0.5 text-[9px] font-bold text-sky-300 border border-sky-500/30 shrink-0" title="Shared space">
+          <span class="ml-1 inline-flex items-center gap-0.5 rounded-full bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-bold text-sky-300 border border-sky-500/30 shrink-0" title="Shared space">
             <Users size={10} />
           </span>
         {/if}
@@ -272,7 +327,7 @@
 {/snippet}
 
 <div class="h-screen w-screen flex bg-[#090A0F] overflow-hidden select-none font-['Instrument_Sans',sans-serif]">
-  <!-- Left Navigation Sidebar (Production Parity Shared Tree View) -->
+  <!-- Left Navigation Sidebar (100% Dashboard Parity) -->
   {#if sidebarOpen}
     <div class="w-64 shrink-0 h-full border-r border-white/10 bg-[#000000] flex flex-col select-none text-white/80 font-['Instrument_Sans',sans-serif]">
       <!-- Top Sidebar Header with Hamburger & Logo -->
@@ -297,7 +352,7 @@
 
       <!-- Sidebar Body Navigation Items -->
       <div class="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-6 text-[13px] custom-scrollbar">
-        <!-- Section: YOUR SPACE / SHARED SPACE -->
+        <!-- Section: SHARED SPACE -->
         <div class="space-y-1">
           <div class="px-2 py-1 text-[10.5px] font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
             Shared Space
@@ -315,7 +370,7 @@
           <!-- Public Shared Tree Navigation -->
           <div class="space-y-0.5 pt-1">
             <div class="flex items-center gap-2 px-3 py-2 rounded-xl text-white/80 font-semibold">
-              <Users size={16} class="text-amber-400 shrink-0" />
+              <User size={16} class="text-amber-400 shrink-0" />
               <span class="truncate">{data.rootFolder?.name || 'Public Workspace'}</span>
             </div>
 
@@ -373,50 +428,56 @@
   <!-- Main Workspace Area -->
   <main class="flex-1 flex flex-col min-h-0 overflow-hidden relative">
     {#if data.type === 'folder'}
-      <!-- Shared Folder Gallery View -->
+      <!-- Shared Folder Gallery View (100% Dashboard Gallery Parity - Image 1) -->
       <div class="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#0A0B0E] text-white">
-        <!-- Top Workspace Bar & Breadcrumbs -->
-        <header class="h-16 border-b border-white/10 px-6 flex items-center justify-between bg-[#0F1117] shrink-0">
+        <!-- Top Workspace Bar & Breadcrumbs (Image 1 Parity) -->
+        <header class="p-6 pb-4 border-b border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#0F1117] shrink-0">
           <div class="flex items-center gap-3">
-            <button
-              onclick={() => (sidebarOpen = !sidebarOpen)}
-              class="p-2 rounded-xl text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-              title="Toggle sidebar"
-            >
-              <LayoutGrid size={18} />
-            </button>
-
-            <!-- Breadcrumb Navigation -->
-            <div class="flex items-center gap-2 text-xs font-medium font-['IBM_Plex_Mono',monospace]">
-              <span class="text-white/40">Shared Space</span>
-              <ChevronRight size={14} class="text-white/30" />
-              {#if data.rootFolder && data.rootFolder.id !== data.folder.id}
-                <a href={`/share/${data.rootFolder.shareToken || data.rootFolder.id}`} class="text-white/60 hover:text-white transition-colors">
-                  {data.rootFolder.name}
-                </a>
-                <ChevronRight size={14} class="text-white/30" />
-              {/if}
-              <span class="text-white font-bold">{data.folder.name}</span>
-            </div>
-
-            <!-- Permission Badge -->
-            {#if data.userRole === 'editor'}
-              <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300 border border-emerald-500/30 font-['IBM_Plex_Mono',monospace]">
-                <Edit3 size={11} /> Public Editor
-              </span>
-            {:else if data.userRole === 'commenter'}
-              <span class="inline-flex items-center gap-1 rounded-full bg-sky-500/20 px-2.5 py-0.5 text-[10px] font-bold text-sky-300 border border-sky-500/30 font-['IBM_Plex_Mono',monospace]">
-                <MessageSquare size={11} /> Public Commenter
-              </span>
-            {:else}
-              <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/30 font-['IBM_Plex_Mono',monospace]">
-                <Eye size={11} /> Public Read-Only
-              </span>
+            {#if !sidebarOpen}
+              <button
+                onclick={() => (sidebarOpen = !sidebarOpen)}
+                title="Open Sidebar"
+                class="p-2 rounded-xl bg-white/5 text-white/80 border border-white/15 hover:bg-white/10 transition-colors shrink-0 shadow-sm cursor-pointer"
+              >
+                <Menu size={18} />
+              </button>
             {/if}
+
+            <div>
+              <!-- Breadcrumb Title Line -->
+              <div class="text-base sm:text-lg font-bold text-white flex items-center gap-2 flex-wrap tracking-tight">
+                <a
+                  href={data.isLoggedIn ? '/workspace' : '/'}
+                  class="text-white/60 hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <User size={16} class="text-amber-400 shrink-0" />
+                  <span>Shared space</span>
+                </a>
+
+                <span class="text-white/30">/</span>
+
+                <span class="text-white font-bold inline-flex items-center gap-1.5">
+                  <span>{data.folder.name}</span>
+                  <button
+                    onclick={() => (shareModalOpen = true)}
+                    title="Share folder"
+                    class="ml-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Share2 size={13} />
+                    <span>Share folder</span>
+                  </button>
+                </span>
+              </div>
+
+              <!-- Item Count Subtitle -->
+              <p class="text-xs text-white/50 mt-1 font-['IBM_Plex_Mono',monospace]">
+                {sortedFilteredDiagrams.length} diagram{sortedFilteredDiagrams.length !== 1 ? 's' : ''} · {filteredSubFolders.length} folder{filteredSubFolders.length !== 1 ? 's' : ''}
+              </p>
+            </div>
           </div>
 
-          <!-- Actions & Account Header -->
-          <div class="flex items-center gap-3">
+          <!-- Actions Header Buttons -->
+          <div class="flex items-center gap-3 shrink-0">
             {#if showForkSuccess}
               <span class="inline-flex items-center gap-1 text-xs text-emerald-400 font-semibold animate-in fade-in">
                 <Check size={14} /> Forked to your workspace!
@@ -425,8 +486,8 @@
 
             {#if data.allowForking}
               <button
-                onclick={handleForkDiagram}
-                class="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                onclick={() => handleForkDiagram()}
+                class="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
                 title="Fork diagram to your personal account"
               >
                 <GitFork size={14} />
@@ -437,47 +498,77 @@
             {#if !data.isLoggedIn}
               <a
                 href="/auth/login"
-                class="px-3.5 py-1.5 rounded-xl bg-white text-black hover:bg-slate-200 text-xs font-bold transition-colors cursor-pointer"
+                class="px-4 py-2 rounded-xl bg-white text-black hover:bg-slate-200 text-xs font-bold transition-colors cursor-pointer shadow-md flex items-center gap-1.5"
               >
-                Log In / Sign Up
+                <LogIn size={14} />
+                <span>Log In / Sign Up</span>
               </a>
             {/if}
           </div>
         </header>
 
-        <!-- Sub-folder Gallery & Diagram Cards Content -->
-        <div class="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
-          <!-- Search & Layout Controls -->
-          <div class="flex items-center justify-between gap-4">
+        <!-- Gallery Controls & Search Toolbar (Image 1 Parity) -->
+        <div class="px-6 pt-5 pb-2 space-y-5">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <!-- Search Bar -->
             <div class="relative flex-1 max-w-md">
-              <Search size={15} class="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40" />
+              <Search class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40" />
               <input
                 type="text"
-                placeholder="Search diagrams or sub-folders..."
                 bind:value={searchQuery}
-                class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-white placeholder-white/40 focus:outline-none focus:border-amber-400/50 transition-colors font-['IBM_Plex_Mono',monospace]"
+                placeholder="Search diagrams or code content..."
+                class="w-full pl-10 pr-9 py-2 text-xs rounded-xl border border-white/15 bg-[#0F1117] text-white placeholder-white/40 focus:outline-none focus:border-white/30 shadow-sm transition-all"
               />
+              {#if searchQuery}
+                <button
+                  onclick={() => (searchQuery = '')}
+                  class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white p-0.5 rounded-md transition-colors"
+                >
+                  <X size={13} />
+                </button>
+              {/if}
             </div>
 
-            <div class="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
-              <button
-                onclick={() => (viewMode = 'grid')}
-                class={`p-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-white/20 text-white' : 'text-white/40 hover:text-white'}`}
-                title="Grid view"
-              >
-                <LayoutGrid size={15} />
-              </button>
-              <button
-                onclick={() => (viewMode = 'list')}
-                class={`p-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-white/20 text-white' : 'text-white/40 hover:text-white'}`}
-                title="List view"
-              >
-                <List size={15} />
-              </button>
+            <!-- Scope & Sort CustomSelect Dropdowns (Image 1 Parity) -->
+            <div class="flex items-center gap-3 shrink-0">
+              <div class="w-36">
+                <CustomSelect
+                  options={scopeOptions}
+                  bind:value={filterScope}
+                />
+              </div>
+
+              <div class="w-36">
+                <CustomSelect
+                  options={sortOptions}
+                  bind:value={sortOption}
+                />
+              </div>
+
+              <!-- Grid vs List View Toggle -->
+              <div class="flex items-center bg-white/5 p-1 rounded-xl border border-white/10">
+                <button
+                  onclick={() => (viewMode = 'grid')}
+                  title="Grid View"
+                  class="p-1.5 rounded-lg transition-colors cursor-pointer {viewMode === 'grid' ? 'bg-white text-black shadow-sm font-bold' : 'text-white/50 hover:text-white'}"
+                >
+                  <LayoutGrid class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onclick={() => (viewMode = 'list')}
+                  title="List View"
+                  class="p-1.5 rounded-lg transition-colors cursor-pointer {viewMode === 'list' ? 'bg-white text-black shadow-sm font-bold' : 'text-white/50 hover:text-white'}"
+                >
+                  <List class="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
+        </div>
 
-          <!-- Sub-Folders Section -->
+        <!-- Sub-folders & Diagram Cards Content Body -->
+        <div class="flex-1 overflow-y-auto p-6 pt-2 space-y-8 custom-scrollbar">
+          <!-- Sub-Folders Section (Image 1 Parity) -->
           {#if filteredSubFolders.length > 0}
             <div class="space-y-3">
               <h3 class="text-xs font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
@@ -486,98 +577,101 @@
 
               <div class={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4' : 'space-y-2'}>
                 {#each filteredSubFolders as subFolder (subFolder.id)}
+                  {@const subCount = getSubFolderDiagramCount(subFolder.id)}
                   <a
                     href={`/share/${subFolder.shareToken || subFolder.id}`}
-                    class="group p-4 rounded-2xl bg-[#0F1117] border border-white/10 hover:border-amber-500/40 hover:bg-[#141722] transition-all flex items-center justify-between shadow-lg"
+                    class="group p-4 rounded-2xl bg-[#0F1117] border border-white/10 hover:border-amber-500/40 hover:bg-[#141722] transition-all flex items-center justify-between shadow-lg cursor-pointer"
                   >
-                    <div class="flex items-center gap-3 min-w-0">
-                      <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                        <FolderIcon size={20} />
+                    <div class="flex items-center gap-3.5 min-w-0">
+                      <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <FolderIcon size={18} />
                       </div>
-                      <div class="min-w-0">
-                        <h4 class="text-xs font-bold text-white group-hover:text-amber-300 transition-colors truncate">
+                      <div class="min-w-0 truncate">
+                        <h4 class="font-semibold text-xs text-white truncate group-hover:text-amber-400 transition-colors">
                           {subFolder.name}
                         </h4>
-                        <p class="text-[10px] text-white/40 font-['IBM_Plex_Mono',monospace]">Sub-folder</p>
+                        <p class="text-[11px] text-white/40 mt-0.5 font-['IBM_Plex_Mono',monospace]">
+                          {subCount} diagram{subCount !== 1 ? 's' : ''}
+                        </p>
                       </div>
                     </div>
-                    <ChevronRight size={16} class="text-white/30 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all shrink-0" />
                   </a>
                 {/each}
               </div>
             </div>
           {/if}
 
-          <!-- Diagrams Gallery Section -->
+          <!-- Diagrams Section (DiagramCard Component Parity - Image 1) -->
           <div class="space-y-3">
             <h3 class="text-xs font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
-              Diagrams ({filteredDiagrams.length})
+              Diagrams ({sortedFilteredDiagrams.length})
             </h3>
 
-            {#if filteredDiagrams.length === 0}
+            {#if sortedFilteredDiagrams.length === 0}
               <div class="p-12 text-center rounded-3xl border border-dashed border-white/10 bg-white/[0.02]">
                 <FileText size={32} class="mx-auto text-white/20 mb-3" />
                 <p class="text-xs text-white/40 font-['IBM_Plex_Mono',monospace]">
-                  No diagrams found in this folder.
+                  No diagrams found matching filters.
                 </p>
               </div>
             {:else if viewMode === 'grid'}
               <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-                {#each filteredDiagrams as diagram (diagram.id)}
-                  <a
-                    href={`/share/${diagram.shareToken || diagram.id}`}
-                    class="group rounded-2xl bg-[#0F1117] border border-white/10 hover:border-amber-500/40 overflow-hidden flex flex-col transition-all shadow-xl hover:-translate-y-0.5"
-                  >
-                    <!-- Live SVG Diagram Preview Thumbnail -->
-                    <div class="h-40 bg-[#06070A] relative flex items-center justify-center p-3 overflow-hidden border-b border-white/10">
-                      <DiagramThumbnail code={diagram.code} />
-                    </div>
-
-                    <div class="p-4 flex flex-col justify-between flex-1">
-                      <div>
-                        <h4 class="text-xs font-bold text-white group-hover:text-amber-300 transition-colors line-clamp-1">
-                          {diagram.title}
-                        </h4>
-                        <p class="text-[10px] text-white/40 mt-1 font-['IBM_Plex_Mono',monospace]">
-                          Updated {new Date(diagram.updatedAt).toLocaleDateString()}
-                        </p>
-                      </div>
-
-                      <div class="mt-4 flex items-center justify-between text-[11px] text-amber-400 font-semibold pt-2 border-t border-white/5">
-                        <span>Open Diagram</span>
-                        <ArrowRight size={13} class="group-hover:translate-x-1 transition-transform" />
-                      </div>
-                    </div>
-                  </a>
+                {#each sortedFilteredDiagrams as diagram (diagram.id)}
+                  <DiagramCard
+                    diagram={{
+                      id: diagram.id,
+                      userId: diagram.userId,
+                      folderId: diagram.folderId,
+                      title: diagram.title,
+                      code: diagram.code,
+                      config: diagram.config,
+                      isShared: true,
+                      isDeleted: false,
+                      createdAt: diagram.createdAt,
+                      updatedAt: diagram.updatedAt
+                    }}
+                    isFavorite={favoriteIds.has(diagram.id)}
+                    onSelect={() => goto(`/share/${diagram.shareToken || diagram.id}`)}
+                    onToggleFavorite={() => toggleFavorite(diagram.id)}
+                    onShare={() => (shareModalOpen = true)}
+                    onRename={() => {}}
+                    onDelete={() => {}}
+                  />
                 {/each}
               </div>
             {:else}
-              <div class="space-y-2">
-                {#each filteredDiagrams as diagram (diagram.id)}
-                  <a
-                    href={`/share/${diagram.shareToken || diagram.id}`}
-                    class="group p-3.5 rounded-2xl bg-[#0F1117] border border-white/10 hover:border-amber-500/40 hover:bg-[#141722] transition-all flex items-center justify-between shadow-lg"
-                  >
-                    <div class="flex items-center gap-3.5 min-w-0">
-                      <div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 text-amber-400 flex items-center justify-center shrink-0">
-                        <FileText size={18} />
-                      </div>
-                      <div class="min-w-0">
-                        <h4 class="text-xs font-bold text-white group-hover:text-amber-300 transition-colors truncate">
-                          {diagram.title}
-                        </h4>
-                        <p class="text-[10px] text-white/40 font-['IBM_Plex_Mono',monospace]">
-                          Updated {new Date(diagram.updatedAt).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div class="flex items-center gap-2 text-xs text-amber-400 font-semibold">
-                      <span>View</span>
-                      <ArrowRight size={14} class="group-hover:translate-x-0.5 transition-transform" />
-                    </div>
-                  </a>
-                {/each}
+              <!-- List View -->
+              <div class="border border-white/15 rounded-2xl overflow-hidden bg-[#0F1117] text-xs">
+                <table class="w-full text-left">
+                  <thead class="bg-white/5 text-white/50 font-semibold border-b border-white/10 font-['IBM_Plex_Mono',monospace]">
+                    <tr>
+                      <th class="py-3 px-4">Title</th>
+                      <th class="py-3 px-4">Last modified</th>
+                      <th class="py-3 px-4 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-white/10">
+                    {#each sortedFilteredDiagrams as diagram (diagram.id)}
+                      <tr
+                        onclick={() => goto(`/share/${diagram.shareToken || diagram.id}`)}
+                        class="hover:bg-white/10 transition-colors cursor-pointer group"
+                      >
+                        <td class="py-3 px-4 font-medium text-white flex items-center gap-3">
+                          <FileText size={16} class="text-amber-400 shrink-0" />
+                          <span class="group-hover:text-amber-400 transition-colors truncate">{diagram.title}</span>
+                        </td>
+                        <td class="py-3 px-4 text-white/50 font-['IBM_Plex_Mono',monospace]">
+                          {new Date(diagram.updatedAt).toLocaleDateString()}
+                        </td>
+                        <td class="py-3 px-4 text-right">
+                          <span class="text-xs text-amber-400 font-semibold inline-flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+                            Open <ArrowRight size={13} />
+                          </span>
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
               </div>
             {/if}
           </div>
@@ -590,7 +684,7 @@
         {title}
         readOnly={!isEditable}
         {saveStatus}
-        {isFavorite}
+        isFavorite={favoriteIds.has(data.diagram.id)}
         spaceName={data.rootFolder?.name || 'Shared Space'}
         folderName={data.currentFolder?.name}
         isSharedSpace={true}
@@ -601,12 +695,13 @@
         onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
         onCodeChange={handleCodeChange}
         onTitleChange={handleTitleChange}
+        onToggleFavorite={() => toggleFavorite(data.diagram.id)}
         onOpenComments={() => (commentsModalOpen = true)}
         onOpenHistory={() => (versionHistoryModalOpen = true)}
         onOpenShare={() => (shareModalOpen = true)}
         onOpenExport={() => (advancedExportModalOpen = true)}
         onOpenTemplates={() => (templatesModalOpen = true)}
-        onFork={handleForkDiagram}
+        onFork={() => handleForkDiagram()}
       />
     {/if}
   </main>

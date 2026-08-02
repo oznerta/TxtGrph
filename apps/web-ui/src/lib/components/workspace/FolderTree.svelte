@@ -98,10 +98,11 @@
 
 {#snippet folderTreeItem(folder: Folder, depth: number, orgId?: string | null)}
   {@const isExpanded = workspaceStore.expandedFolderIds.has(folder.id)}
+  {@const isSelected = workspaceStore.activeFolderId === folder.id}
   {@const subFolders = workspaceStore.getChildFolders(folder.id, orgId)}
   {@const diagrams = workspaceStore.getFolderDiagrams(folder.id, orgId)}
 
-  <div class="group relative flex items-center justify-between px-2 py-1 rounded-lg cursor-pointer hover:bg-white/10 text-white/70 hover:text-white transition-colors">
+  <div class="group relative flex items-center justify-between px-2.5 py-1.5 rounded-full cursor-pointer transition-all {isSelected ? 'bg-amber-500/15 text-amber-300 border border-amber-500/50 font-bold shadow-sm' : 'text-white/70 hover:bg-white/10 hover:text-white'}">
     <button
       onclick={() => {
         workspaceStore.toggleFolder(folder.id);
