@@ -4,17 +4,20 @@ import { createSupabaseServerClient } from '$lib/supabase/server';
 import { authenticateMcpRequest } from '$lib/server/mcpAuth';
 import { TOOL_DEFINITIONS, handleMcpToolCall } from '@txtgrph/mcp-server';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization, Content-Type, Client-Id, Client-Secret, X-Txtgrph-Api-Key',
-  'Access-Control-Max-Age': '86400'
-};
+function getCorsHeaders(origin: string) {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, Client-Id, Client-Secret, X-Txtgrph-Api-Key',
+    'Access-Control-Max-Age': '86400',
+    'WWW-Authenticate': `Bearer realm="txtgrph", authorization_uri="${origin}/api/v1/oauth/authorize", token_uri="${origin}/api/v1/oauth/token"`
+  };
+}
 
-export const OPTIONS: RequestHandler = async () => {
+export const OPTIONS: RequestHandler = async ({ url }) => {
   return new Response(null, {
     status: 200,
-    headers: corsHeaders
+    headers: getCorsHeaders(url.origin)
   });
 };
 
@@ -22,6 +25,26 @@ export const GET: RequestHandler = async (event) => {
   const supabase = createSupabaseServerClient(event);
   const authUser = await authenticateMcpRequest(event.request, supabase);
   const origin = event.url.origin;
+
+  if (!authUser) {
+    return json(
+      {
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'OAuth 2.0 Bearer token or Client Credentials required' },
+        auth: {
+          type: 'oauth2',
+          issuer: origin,
+          authorization_endpoint: `${origin}/api/v1/oauth/authorize`,
+          token_endpoint: `${origin}/api/v1/oauth/token`,
+          userinfo_endpoint: `${origin}/api/v1/oauth/userinfo`
+        }
+      },
+      {
+        status: 401,
+        headers: getCorsHeaders(origin)
+      }
+    );
+  }
 
   return json(
     {
@@ -43,22 +66,26 @@ export const GET: RequestHandler = async (event) => {
         tools: TOOL_DEFINITIONS,
       },
     },
-    { headers: corsHeaders }
+    { headers: getCorsHeaders(origin) }
   );
 };
 
 export const POST: RequestHandler = async (event) => {
   const supabase = createSupabaseServerClient(event);
   const authUser = await authenticateMcpRequest(event.request, supabase);
+  const origin = event.url.origin;
 
   if (!authUser) {
     return json(
       {
         jsonrpc: '2.0',
-        error: { code: -32001, message: 'Unauthorized: Invalid or missing Bearer API Token or OAuth credentials' },
+        error: { code: -32001, message: 'Unauthorized: Standard OAuth 2.0 Bearer token or Client credentials required' },
         id: null
       },
-      { status: 401, headers: corsHeaders }
+      {
+        status: 401,
+        headers: getCorsHeaders(origin)
+      }
     );
   }
 
@@ -80,19 +107,19 @@ export const POST: RequestHandler = async (event) => {
                 tools: {},
                 auth: {
                   type: 'oauth2',
-                  token_endpoint: `${event.url.origin}/api/v1/oauth/token`
+                  token_endpoint: `${origin}/api/v1/oauth/token`
                 }
               },
               serverInfo: { name: 'txtgrph-mcp-server', version: '0.1.0' }
             },
             id: requestId
           },
-          { headers: corsHeaders }
+          { headers: getCorsHeaders(origin) }
         );
       }
 
       if (method === 'ping') {
-        return json({ jsonrpc: '2.0', result: {}, id: requestId }, { headers: corsHeaders });
+        return json({ jsonrpc: '2.0', result: {}, id: requestId }, { headers: getCorsHeaders(origin) });
       }
 
       if (method === 'tools/list') {
@@ -102,7 +129,7 @@ export const POST: RequestHandler = async (event) => {
             result: { tools: TOOL_DEFINITIONS },
             id: requestId
           },
-          { headers: corsHeaders }
+          { headers: getCorsHeaders(origin) }
         );
       }
 
@@ -116,7 +143,7 @@ export const POST: RequestHandler = async (event) => {
               error: { code: -32602, message: 'Invalid params: Missing tool name' },
               id: requestId
             },
-            { status: 400, headers: corsHeaders }
+            { status: 400, headers: getCorsHeaders(origin) }
           );
         }
 
@@ -128,7 +155,7 @@ export const POST: RequestHandler = async (event) => {
               error: { code: -32603, message: result.content[0]?.text || 'Tool execution failed' },
               id: requestId
             },
-            { headers: corsHeaders }
+            { headers: getCorsHeaders(origin) }
           );
         }
 
@@ -138,7 +165,7 @@ export const POST: RequestHandler = async (event) => {
             result: { content: result.content },
             id: requestId
           },
-          { headers: corsHeaders }
+          { headers: getCorsHeaders(origin) }
         );
       }
 
@@ -148,7 +175,7 @@ export const POST: RequestHandler = async (event) => {
           error: { code: -32601, message: `Method not found: ${method}` },
           id: requestId
         },
-        { status: 404, headers: corsHeaders }
+        { status: 404, headers: getCorsHeaders(origin) }
       );
     }
 
@@ -157,7 +184,7 @@ export const POST: RequestHandler = async (event) => {
     if (!name || typeof name !== 'string') {
       return json(
         { success: false, error: { code: 'BAD_REQUEST', message: 'Missing tool name or method' } },
-        { status: 400, headers: corsHeaders }
+        { status: 400, headers: getCorsHeaders(origin) }
       );
     }
 
@@ -168,12 +195,12 @@ export const POST: RequestHandler = async (event) => {
         success: !result.isError,
         data: result,
       },
-      { headers: corsHeaders }
+      { headers: getCorsHeaders(origin) }
     );
   } catch (err: any) {
     return json(
       { success: false, error: { code: 'INVALID_JSON', message: err?.message || 'Malformed JSON payload' } },
-      { status: 400, headers: corsHeaders }
+      { status: 400, headers: getCorsHeaders(origin) }
     );
   }
 };
