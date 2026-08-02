@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import {
     Code2,
     Mail,
@@ -20,6 +21,9 @@
   let isSignUp = $state(false);
   let message = $state<{ type: 'success' | 'error'; text: string } | null>(null);
   let loading = $state(false);
+
+  // Support OAuth redirect: after login, go back to the authorize consent page
+  const redirectAfterLogin = $derived($page.url.searchParams.get('redirect'));
 
   const supabase = createSupabaseBrowserClient();
 
@@ -54,7 +58,12 @@
           password,
         });
         if (error) throw error;
-        await goto('/workspace');
+        // If there's a redirect param (e.g. from OAuth authorize), go there instead
+        if (redirectAfterLogin) {
+          window.location.href = redirectAfterLogin;
+        } else {
+          await goto('/workspace');
+        }
       }
     } catch (err: any) {
       message = { type: 'error', text: err.message || 'Authentication failed. Please try again.' };

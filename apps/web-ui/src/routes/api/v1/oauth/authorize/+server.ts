@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { createSupabaseServerClient } from '$lib/supabase/server';
 import crypto from 'crypto';
 
 const corsHeaders = {
@@ -9,21 +10,28 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400'
 };
 
-// Generate a short-lived authorization code
 function generateAuthCode(): string {
   return 'txtgrph_ac_' + crypto.randomBytes(24).toString('hex');
 }
 
-// Build the HTML consent page that Gemini opens in a popup
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function buildConsentPage(params: {
   redirectUri: string;
   state: string | null;
   clientId: string | null;
   scope: string | null;
-  responseType: string | null;
   code: string;
+  userEmail: string;
 }): string {
-  const { redirectUri, state, clientId, scope, code } = params;
+  const { redirectUri, state, clientId, code, userEmail } = params;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -53,104 +61,56 @@ function buildConsentPage(params: {
       box-shadow: 0 25px 50px rgba(0,0,0,0.5);
     }
     .logo {
-      width: 64px;
-      height: 64px;
+      width: 64px; height: 64px;
       background: linear-gradient(135deg, rgba(245,158,11,0.2), rgba(245,158,11,0.05));
       border: 1px solid rgba(245,158,11,0.3);
       border-radius: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       margin: 0 auto 20px;
       font-size: 28px;
     }
-    h1 {
-      font-size: 20px;
-      font-weight: 700;
-      margin-bottom: 8px;
-      letter-spacing: -0.3px;
+    h1 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    .subtitle { font-size: 14px; color: rgba(255,255,255,0.5); margin-bottom: 24px; line-height: 1.5; }
+    .app-name { color: #f59e0b; font-weight: 600; }
+    .user-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px; padding: 10px 16px; margin-bottom: 24px; font-size: 13px;
     }
-    .subtitle {
-      font-size: 14px;
-      color: rgba(255,255,255,0.5);
-      margin-bottom: 28px;
-      line-height: 1.5;
-    }
-    .app-name {
-      color: #f59e0b;
-      font-weight: 600;
+    .user-badge .avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; color: #000;
     }
     .permissions {
       background: rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 28px;
-      text-align: left;
+      border-radius: 12px; padding: 16px; margin-bottom: 28px; text-align: left;
     }
     .permissions h3 {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: rgba(255,255,255,0.4);
-      margin-bottom: 12px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: rgba(255,255,255,0.4); margin-bottom: 12px;
     }
     .perm-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 0;
-      font-size: 13px;
-      color: rgba(255,255,255,0.8);
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 0; font-size: 13px; color: rgba(255,255,255,0.8);
     }
-    .perm-item + .perm-item {
-      border-top: 1px solid rgba(255,255,255,0.05);
-    }
-    .check {
-      color: #22c55e;
-      font-size: 16px;
-      flex-shrink: 0;
-    }
+    .perm-item + .perm-item { border-top: 1px solid rgba(255,255,255,0.05); }
+    .check { color: #22c55e; font-size: 16px; flex-shrink: 0; }
     .btn-authorize {
-      display: block;
-      width: 100%;
-      padding: 14px;
-      background: #f59e0b;
-      color: #000;
-      font-size: 15px;
-      font-weight: 700;
-      border: none;
-      border-radius: 12px;
-      cursor: pointer;
-      transition: background 0.2s;
-      letter-spacing: -0.2px;
+      display: block; width: 100%; padding: 14px;
+      background: #f59e0b; color: #000; font-size: 15px; font-weight: 700;
+      border: none; border-radius: 12px; cursor: pointer; transition: background 0.2s;
     }
-    .btn-authorize:hover {
-      background: #d97706;
-    }
+    .btn-authorize:hover { background: #d97706; }
     .btn-deny {
-      display: block;
-      width: 100%;
-      margin-top: 12px;
-      padding: 12px;
-      background: transparent;
-      color: rgba(255,255,255,0.4);
-      font-size: 13px;
-      font-weight: 500;
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
+      display: block; width: 100%; margin-top: 12px; padding: 12px;
+      background: transparent; color: rgba(255,255,255,0.4); font-size: 13px; font-weight: 500;
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; cursor: pointer; transition: all 0.2s;
     }
-    .btn-deny:hover {
-      color: rgba(255,255,255,0.7);
-      border-color: rgba(255,255,255,0.2);
-    }
-    .footer {
-      margin-top: 20px;
-      font-size: 11px;
-      color: rgba(255,255,255,0.25);
-    }
+    .btn-deny:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.2); }
+    .footer { margin-top: 20px; font-size: 11px; color: rgba(255,255,255,0.25); }
   </style>
 </head>
 <body>
@@ -161,6 +121,11 @@ function buildConsentPage(params: {
       <span class="app-name">${escapeHtml(clientId || 'An application')}</span>
       wants to access your TxtGrph workspace.
     </p>
+
+    <div class="user-badge">
+      <div class="avatar">${escapeHtml(userEmail.charAt(0).toUpperCase())}</div>
+      <span style="color:rgba(255,255,255,0.7)">${escapeHtml(userEmail)}</span>
+    </div>
 
     <div class="permissions">
       <h3>This will allow access to:</h3>
@@ -174,7 +139,6 @@ function buildConsentPage(params: {
       <input type="hidden" name="state" value="${escapeHtml(state || '')}" />
       <input type="hidden" name="code" value="${escapeHtml(code)}" />
       <input type="hidden" name="client_id" value="${escapeHtml(clientId || '')}" />
-      <input type="hidden" name="scope" value="${escapeHtml(scope || 'mcp read write')}" />
       <input type="hidden" name="action" value="approve" />
       <button type="submit" class="btn-authorize">Authorize Access</button>
     </form>
@@ -192,28 +156,20 @@ function buildConsentPage(params: {
 </html>`;
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
 export const OPTIONS: RequestHandler = async () => {
   return new Response(null, { status: 200, headers: corsHeaders });
 };
 
-// GET: Show the interactive consent page
-export const GET: RequestHandler = async ({ url }) => {
+// GET: Check session → redirect to login or show consent page
+export const GET: RequestHandler = async (event) => {
+  const { url } = event;
   const redirectUri = url.searchParams.get('redirect_uri');
   const state = url.searchParams.get('state');
   const clientId = url.searchParams.get('client_id');
   const scope = url.searchParams.get('scope');
   const responseType = url.searchParams.get('response_type');
 
-  // If no redirect_uri, return JSON metadata
+  // If no redirect_uri, return JSON info
   if (!redirectUri) {
     return json(
       {
@@ -225,22 +181,36 @@ export const GET: RequestHandler = async ({ url }) => {
     );
   }
 
-  // Generate a one-time authorization code
-  const code = generateAuthCode();
+  // Check if user is logged in via Supabase session cookies
+  const supabase = createSupabaseServerClient(event);
+  const { data: { user } } = await supabase.auth.getUser();
 
-  // Serve the interactive HTML consent page
-  const html = buildConsentPage({ redirectUri, state, clientId, scope, responseType, code });
+  if (!user) {
+    // Not logged in — redirect to TxtGrph login page with a return URL
+    const currentUrl = url.toString();
+    const loginUrl = new URL('/auth', url.origin);
+    loginUrl.searchParams.set('redirect', currentUrl);
+    return Response.redirect(loginUrl.toString(), 302);
+  }
+
+  // User is logged in — show the consent page
+  const code = generateAuthCode();
+  const html = buildConsentPage({
+    redirectUri,
+    state,
+    clientId,
+    scope,
+    code,
+    userEmail: user.email || user.id
+  });
 
   return new Response(html, {
     status: 200,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store'
-    }
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
   });
 };
 
-// POST: Process consent form submission
+// POST: Process consent form (approve or deny)
 export const POST: RequestHandler = async ({ request }) => {
   const formData = await request.formData();
   const action = formData.get('action') as string;
@@ -259,11 +229,9 @@ export const POST: RequestHandler = async ({ request }) => {
     const redirectUrl = new URL(redirectUri);
 
     if (action === 'approve') {
-      // User approved — redirect with authorization code
       redirectUrl.searchParams.set('code', code || generateAuthCode());
       if (state) redirectUrl.searchParams.set('state', state);
     } else {
-      // User denied — redirect with error
       redirectUrl.searchParams.set('error', 'access_denied');
       redirectUrl.searchParams.set('error_description', 'User denied the authorization request');
       if (state) redirectUrl.searchParams.set('state', state);
