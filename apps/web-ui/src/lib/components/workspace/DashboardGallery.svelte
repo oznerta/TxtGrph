@@ -297,7 +297,7 @@
               <Building2 size={16} class="text-amber-400" />
               <span>{activeOrg.name}</span>
             {:else}
-              <User size={16} class="text-white/40" />
+              <User size={16} class="text-amber-400 shrink-0" />
               <span>Personal space</span>
             {/if}
           </button>

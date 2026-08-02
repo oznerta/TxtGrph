@@ -111,10 +111,10 @@
     >
       {#if isExpanded}
         <ChevronDown size={13} class="shrink-0 text-white/50" />
-        <FolderOpen size={13} class="shrink-0 text-white" />
+        <FolderOpen size={13} class="shrink-0 text-amber-400" />
       {:else}
         <ChevronRight size={13} class="shrink-0 text-white/50" />
-        <FolderIcon size={13} class="shrink-0 text-white/50" />
+        <FolderIcon size={13} class="shrink-0 text-amber-400/80 group-hover:text-amber-400" />
       {/if}
       <span class="truncate font-medium">{folder.name}</span>
       {#if folder.isShared}
@@ -330,7 +330,7 @@
             {:else}
               <ChevronRight size={15} class="text-white/50" />
             {/if}
-            <User size={16} class="text-white/50" />
+            <User size={16} class="text-amber-400 shrink-0" />
             <span>Personal</span>
           </button>
 
