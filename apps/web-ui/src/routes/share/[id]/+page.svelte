@@ -79,7 +79,7 @@
     if (data.rootFolder?.id) ids.add(data.rootFolder.id);
     if (data.folder?.id) ids.add(data.folder.id);
     if (data.currentFolder?.id) ids.add(data.currentFolder.id);
-    if (data.type === 'diagram' && data.diagram?.folderId) ids.add(data.diagram.folderId);
+    if (data.type === 'diagram' && (data.diagram as any)?.folderId) ids.add((data.diagram as any).folderId);
     if (data.treeFolders) {
       data.treeFolders.forEach((f: any) => ids.add(f.id));
     }
@@ -530,7 +530,7 @@
                   >
                     <!-- Live SVG Diagram Preview Thumbnail -->
                     <div class="h-40 bg-[#06070A] relative flex items-center justify-center p-3 overflow-hidden border-b border-white/10">
-                      <DiagramThumbnail code={diagram.code} title={diagram.title} />
+                      <DiagramThumbnail code={diagram.code} />
                     </div>
 
                     <div class="p-4 flex flex-col justify-between flex-1">
@@ -622,45 +622,50 @@
 <!-- Modals -->
 {#if versionHistoryModalOpen && data.type === 'diagram'}
   <VersionHistoryModal
+    open={versionHistoryModalOpen}
     diagramId={data.diagram.id}
-    onClose={() => (versionHistoryModalOpen = false)}
+    currentCode={code}
+    userEmail={data.userEmail || ''}
     onRestore={(restoredCode) => {
       code = restoredCode;
       handleCodeChange(restoredCode);
       versionHistoryModalOpen = false;
     }}
+    onclose={() => (versionHistoryModalOpen = false)}
   />
 {/if}
 
 {#if commentsModalOpen && data.type === 'diagram'}
   <CommentsModal
+    open={commentsModalOpen}
     diagramId={data.diagram.id}
-    userRole={data.userRole}
-    userEmail={data.userEmail}
-    onClose={() => (commentsModalOpen = false)}
+    userEmail={data.userEmail || ''}
+    onclose={() => (commentsModalOpen = false)}
   />
 {/if}
 
 {#if advancedExportModalOpen && data.type === 'diagram'}
   <AdvancedExportModal
+    open={advancedExportModalOpen}
     {code}
     {title}
-    onClose={() => (advancedExportModalOpen = false)}
+    onclose={() => (advancedExportModalOpen = false)}
   />
 {/if}
 
 {#if shareModalOpen}
   <ShareModal
-    targetItem={data.type === 'diagram' ? { type: 'diagram', id: data.diagram.id, title: data.diagram.title, shareToken: data.diagram.shareToken, publicAccessRole: data.userRole } : { type: 'folder', id: data.folder.id, name: data.folder.name, shareToken: data.folder.shareToken, publicAccessRole: data.userRole }}
-    userEmail={data.userEmail}
-    onClose={() => (shareModalOpen = false)}
-    onUpdated={() => {}}
+    open={shareModalOpen}
+    diagram={data.type === 'diagram' ? (data.diagram as any) : null}
+    folder={data.type === 'folder' ? (data.folder as any) : null}
+    onclose={() => (shareModalOpen = false)}
   />
 {/if}
 
 {#if templatesModalOpen}
   <TemplatesModal
-    onClose={() => (templatesModalOpen = false)}
+    open={templatesModalOpen}
+    onclose={() => (templatesModalOpen = false)}
     onSelectTemplate={(templateCode) => {
       if (isEditable) {
         code = templateCode;
