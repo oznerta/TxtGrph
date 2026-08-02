@@ -27,18 +27,44 @@ export function generateMcpToken(): { rawToken: string; tokenHash: string; token
 }
 
 /**
- * Authenticates a request via Bearer MCP token or active user session.
+ * Authenticates a request via Bearer MCP token, Client-Secret header, or active user session.
  */
 export async function authenticateMcpRequest(
   request: Request,
   supabase: SupabaseClient
 ): Promise<AuthenticatedUser | null> {
+  let rawToken: string | null = null;
+
+  // 1. Authorization: Bearer <token>
   const authHeader = request.headers.get('Authorization');
-
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    const rawToken = authHeader.substring(7).trim();
-    if (!rawToken) return null;
+    rawToken = authHeader.substring(7).trim();
+  }
 
+  // 2. Client-Secret or X-Client-Secret or X-Txtgrph-Api-Key headers (Gemini Spark connected apps support)
+  if (!rawToken) {
+    rawToken =
+      request.headers.get('Client-Secret')?.trim() ||
+      request.headers.get('client-secret')?.trim() ||
+      request.headers.get('X-Client-Secret')?.trim() ||
+      request.headers.get('X-Txtgrph-Api-Key')?.trim() ||
+      null;
+  }
+
+  // 3. Fallback to query string parameter ?api_key= or ?token= or ?client_secret=
+  if (!rawToken && request.url) {
+    try {
+      const url = new URL(request.url);
+      rawToken =
+        url.searchParams.get('api_key') ||
+        url.searchParams.get('token') ||
+        url.searchParams.get('client_secret');
+    } catch {
+      // ignore URL parse error
+    }
+  }
+
+  if (rawToken) {
     const tokenHash = hashToken(rawToken);
 
     // Call Postgres verification RPC function

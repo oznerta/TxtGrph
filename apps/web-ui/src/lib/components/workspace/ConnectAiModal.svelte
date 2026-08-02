@@ -13,7 +13,9 @@
     Bot,
     MessageSquare,
     Zap,
-    Loader2
+    Loader2,
+    KeyRound,
+    AlertCircle
   } from 'lucide-svelte';
 
   interface Props {
@@ -22,9 +24,9 @@
 
   let { isOpen = $bindable(false) }: Props = $props();
 
-  let activeTab = $state<'chatgpt' | 'claude' | 'gemini' | 'cursor'>('chatgpt');
-  let userToken = $state<string>('');
-  let isLoadingToken = $state(false);
+  let activeTab = $state<'chatgpt' | 'claude' | 'gemini' | 'cursor'>('gemini');
+  let fullRawToken = $state<string>('');
+  let isGeneratingToken = $state(false);
   let baseUrl = $state('http://localhost:5173');
   let copiedField = $state<string | null>(null);
 
@@ -35,36 +37,27 @@
   });
 
   $effect(() => {
-    if (isOpen && !userToken) {
-      loadOrCreateToken();
+    if (isOpen && !fullRawToken) {
+      generateFreshToken();
     }
   });
 
-  async function loadOrCreateToken() {
+  async function generateFreshToken() {
     try {
-      isLoadingToken = true;
-      const res = await fetch('/api/v1/tokens');
+      isGeneratingToken = true;
+      const res = await fetch('/api/v1/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'AI Platform Key' }),
+      });
       const payload = await res.json();
-
-      if (res.ok && payload.success && payload.data?.length > 0) {
-        // Use existing token prefix or fetch raw if available
-        userToken = payload.data[0].token_prefix + '...';
-      } else {
-        // Create default token
-        const createRes = await fetch('/api/v1/tokens', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'AI Chat MCP Key' }),
-        });
-        const createPayload = await createRes.json();
-        if (createRes.ok && createPayload.success) {
-          userToken = createPayload.data.rawToken;
-        }
+      if (res.ok && payload.success) {
+        fullRawToken = payload.data.rawToken;
       }
     } catch (err) {
-      console.error('Failed to load MCP token for modal:', err);
+      console.error('Failed to generate MCP token:', err);
     } finally {
-      isLoadingToken = false;
+      isGeneratingToken = false;
     }
   }
 
@@ -76,9 +69,9 @@
     }, 2000);
   }
 
-  const tokenDisplay = $derived(userToken || 'txtgrph_mcp_YOUR_API_KEY');
+  const tokenDisplay = $derived(fullRawToken || 'txtgrph_mcp_YOUR_FULL_UNTRUNCATED_SECRET_KEY');
 
-  // Prompts for Chat Platforms
+  // Prompts & Configs with Full Un-truncated Tokens
   const chatGptOpenApiUrl = $derived(`${baseUrl}/api/v1/openapi.json`);
   const chatGptPrompt = $derived(`Connect TxtGrph MCP Action to create and edit Mermaid diagrams.
 OpenAPI Action Spec URL: ${chatGptOpenApiUrl}
@@ -99,18 +92,7 @@ System Instruction: When I ask to create or update diagrams, use the TxtGrph MCP
   }
 }`);
 
-  const claudeChatPrompt = $derived(`You are integrated with TxtGrph MCP Server.
-Endpoint: ${baseUrl}/api/v1/mcp
-Authorization: Bearer ${tokenDisplay}
-
-Please use TxtGrph tools (list_diagrams, create_diagram, update_diagram, render_mermaid_svg) whenever I ask you to design system architectures, flowcharts, or sequence diagrams.`);
-
   const geminiEndpointUrl = $derived(`${baseUrl}/api/v1/mcp`);
-  const geminiChatPrompt = $derived(`You are connected to TxtGrph MCP (Model Context Protocol).
-Server Endpoint: ${geminiEndpointUrl}
-Authorization: Bearer ${tokenDisplay}
-
-Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagrams in my TxtGrph workspace.`);
 
   const cursorConfig = $derived(`{
   "mcpServers": {
@@ -143,7 +125,7 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
               <span class="px-2 py-0.5 text-[10px] uppercase font-bold rounded-full bg-amber-400 text-black font-['IBM_Plex_Mono',monospace]">MCP Live</span>
             </h3>
             <p class="text-xs text-white/50">
-              Direct 1-click connectors & prompts for ChatGPT, Claude, Gemini, and Cursor.
+              Direct 1-click connectors & setup parameters for Gemini, ChatGPT, Claude, and Cursor.
             </p>
           </div>
         </div>
@@ -154,6 +136,17 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
 
       <!-- Platform Selection Tabs -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 font-['IBM_Plex_Mono',monospace]">
+        <button
+          onclick={() => (activeTab = 'gemini')}
+          class="p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 {activeTab === 'gemini' ? 'bg-amber-500/15 border-amber-400 text-white shadow-md' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}"
+        >
+          <div class="flex items-center justify-between">
+            <Globe size={18} class={activeTab === 'gemini' ? 'text-amber-400' : 'text-white/40'} />
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">Gemini Spark</span>
+          </div>
+          <span class="text-xs font-bold">Gemini</span>
+        </button>
+
         <button
           onclick={() => (activeTab = 'chatgpt')}
           class="p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 {activeTab === 'chatgpt' ? 'bg-amber-500/15 border-amber-400 text-white shadow-md' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}"
@@ -177,17 +170,6 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
         </button>
 
         <button
-          onclick={() => (activeTab = 'gemini')}
-          class="p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 {activeTab === 'gemini' ? 'bg-amber-500/15 border-amber-400 text-white shadow-md' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}"
-        >
-          <div class="flex items-center justify-between">
-            <Globe size={18} class={activeTab === 'gemini' ? 'text-amber-400' : 'text-white/40'} />
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 font-bold">Gemini AI</span>
-          </div>
-          <span class="text-xs font-bold">Gemini</span>
-        </button>
-
-        <button
           onclick={() => (activeTab = 'cursor')}
           class="p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 {activeTab === 'cursor' ? 'bg-amber-500/15 border-amber-400 text-white shadow-md' : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'}"
         >
@@ -201,10 +183,85 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
 
       <!-- Tab Content & Launch Actions -->
       <div class="space-y-4">
-        {#if activeTab === 'chatgpt'}
-          <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3">
+        {#if activeTab === 'gemini'}
+          <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3 font-['IBM_Plex_Mono',monospace]">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-amber-400 font-['IBM_Plex_Mono',monospace]">ChatGPT Custom GPT / Action Connector</span>
+              <span class="text-xs font-bold text-amber-400">Gemini Spark Custom Connected App Setup</span>
+              <a
+                href="https://gemini.google.com/spark/apps"
+                target="_blank"
+                class="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
+              >
+                <span>Launch Gemini Spark Apps</span>
+                <ExternalLink size={13} />
+              </a>
+            </div>
+
+            <p class="text-[11px] text-white/70 leading-relaxed font-['Instrument_Sans',sans-serif]">
+              In Gemini Spark → <strong>Connected Apps</strong> → <strong>Set up a custom connected app</strong>, fill in the following parameters:
+            </p>
+
+            <div class="space-y-2.5">
+              <!-- Field 1: Custom App Link -->
+              <div class="p-3 rounded-xl bg-black/60 border border-white/10 space-y-1">
+                <div class="flex items-center justify-between text-[11px] text-white/60">
+                  <span>1. Add a custom app link:</span>
+                  <button
+                    onclick={() => handleCopy(geminiEndpointUrl, 'gemini_link')}
+                    class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer text-[11px]"
+                  >
+                    {#if copiedField === 'gemini_link'}
+                      <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied!</span>
+                    {:else}
+                      <Copy size={12} /> <span>Copy Link</span>
+                    {/if}
+                  </button>
+                </div>
+                <div class="text-[12px] text-amber-300 font-bold select-all break-all">{geminiEndpointUrl}</div>
+              </div>
+
+              <!-- Field 2: Client ID -->
+              <div class="p-3 rounded-xl bg-black/60 border border-white/10 space-y-1">
+                <div class="flex items-center justify-between text-[11px] text-white/60">
+                  <span>2. Advanced Settings → Client ID:</span>
+                  <button
+                    onclick={() => handleCopy('txtgrph', 'gemini_client_id')}
+                    class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer text-[11px]"
+                  >
+                    {#if copiedField === 'gemini_client_id'}
+                      <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied!</span>
+                    {:else}
+                      <Copy size={12} /> <span>Copy Client ID</span>
+                    {/if}
+                  </button>
+                </div>
+                <div class="text-[12px] text-amber-300 font-bold select-all">txtgrph</div>
+              </div>
+
+              <!-- Field 3: Client Secret (Un-truncated Key) -->
+              <div class="p-3 rounded-xl bg-black/60 border border-white/10 space-y-1">
+                <div class="flex items-center justify-between text-[11px] text-white/60">
+                  <span>3. Advanced Settings → Client Secret (Full Secret Key):</span>
+                  <button
+                    onclick={() => handleCopy(tokenDisplay, 'gemini_secret')}
+                    class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer text-[11px]"
+                  >
+                    {#if copiedField === 'gemini_secret'}
+                      <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied Full Key!</span>
+                    {:else}
+                      <Copy size={12} /> <span>Copy Secret Key</span>
+                    {/if}
+                  </button>
+                </div>
+                <div class="text-[11px] text-emerald-400 font-mono select-all break-all">{tokenDisplay}</div>
+              </div>
+            </div>
+          </div>
+
+        {:else if activeTab === 'chatgpt'}
+          <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3 font-['IBM_Plex_Mono',monospace]">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-amber-400">ChatGPT Custom GPT / Action Connector</span>
               <a
                 href="https://chatgpt.com/gpts"
                 target="_blank"
@@ -215,11 +272,7 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
               </a>
             </div>
 
-            <p class="text-xs text-white/70 leading-relaxed">
-              Import TxtGrph's live OpenAPI spec into ChatGPT to enable direct diagram creation & editing from your ChatGPT conversations.
-            </p>
-
-            <div class="space-y-2 pt-1 font-['IBM_Plex_Mono',monospace]">
+            <div class="space-y-2">
               <div class="flex items-center justify-between text-[11px] text-white/50">
                 <span>1. OpenAPI Spec URL:</span>
                 <button
@@ -235,27 +288,27 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
               </div>
               <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto select-all">{chatGptOpenApiUrl}</pre>
 
-              <div class="flex items-center justify-between text-[11px] text-white/50 pt-2">
-                <span>2. AI Prompt to Paste in Chat:</span>
+              <div class="flex items-center justify-between text-[11px] text-white/50 pt-1">
+                <span>2. Full Un-truncated Bearer Key:</span>
                 <button
-                  onclick={() => handleCopy(chatGptPrompt, 'chatgpt_prompt')}
+                  onclick={() => handleCopy(tokenDisplay, 'chatgpt_key')}
                   class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
                 >
-                  {#if copiedField === 'chatgpt_prompt'}
+                  {#if copiedField === 'chatgpt_key'}
                     <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied!</span>
                   {:else}
-                    <Copy size={12} /> <span>Copy Prompt</span>
+                    <Copy size={12} /> <span>Copy Bearer Key</span>
                   {/if}
                 </button>
               </div>
-              <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto whitespace-pre-wrap select-all">{chatGptPrompt}</pre>
+              <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-emerald-400 overflow-x-auto select-all break-all">{tokenDisplay}</pre>
             </div>
           </div>
 
         {:else if activeTab === 'claude'}
-          <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3">
+          <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3 font-['IBM_Plex_Mono',monospace]">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-amber-400 font-['IBM_Plex_Mono',monospace]">Claude Desktop & Claude.ai Integration</span>
+              <span class="text-xs font-bold text-amber-400">Claude Desktop & Claude.ai Integration</span>
               <a
                 href="https://claude.ai"
                 target="_blank"
@@ -266,87 +319,21 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
               </a>
             </div>
 
-            <div class="space-y-2 font-['IBM_Plex_Mono',monospace]">
+            <div class="space-y-2">
               <div class="flex items-center justify-between text-[11px] text-white/50">
-                <span>1. Claude Desktop Config (claude_desktop_config.json):</span>
+                <span>Claude Desktop Config (claude_desktop_config.json):</span>
                 <button
                   onclick={() => handleCopy(claudeDesktopConfig, 'claude_config')}
                   class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   {#if copiedField === 'claude_config'}
-                    <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied Config!</span>
+                    <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied JSON!</span>
                   {:else}
                     <Copy size={12} /> <span>Copy JSON</span>
                   {/if}
                 </button>
               </div>
               <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto select-all">{claudeDesktopConfig}</pre>
-
-              <div class="flex items-center justify-between text-[11px] text-white/50 pt-2">
-                <span>2. Claude Web Chat Prompt:</span>
-                <button
-                  onclick={() => handleCopy(claudeChatPrompt, 'claude_prompt')}
-                  class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  {#if copiedField === 'claude_prompt'}
-                    <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied!</span>
-                  {:else}
-                    <Copy size={12} /> <span>Copy Chat Prompt</span>
-                  {/if}
-                </button>
-              </div>
-              <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto whitespace-pre-wrap select-all">{claudeChatPrompt}</pre>
-            </div>
-          </div>
-
-        {:else if activeTab === 'gemini'}
-          <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-amber-400 font-['IBM_Plex_Mono',monospace]">Gemini Spark Custom Connected App</span>
-              <a
-                href="https://gemini.google.com/spark/apps"
-                target="_blank"
-                class="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
-              >
-                <span>Launch Gemini Spark Apps</span>
-                <ExternalLink size={13} />
-              </a>
-            </div>
-
-            <p class="text-xs text-white/70 leading-relaxed">
-              Connect TxtGrph to Gemini Spark via Google's Custom Connected Apps interface.
-            </p>
-
-            <div class="space-y-2 font-['IBM_Plex_Mono',monospace]">
-              <div class="flex items-center justify-between text-[11px] text-white/50">
-                <span>1. Add custom app link (Paste into Gemini Spark):</span>
-                <button
-                  onclick={() => handleCopy(geminiEndpointUrl, 'gemini_endpoint')}
-                  class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  {#if copiedField === 'gemini_endpoint'}
-                    <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied!</span>
-                  {:else}
-                    <Copy size={12} /> <span>Copy App Link</span>
-                  {/if}
-                </button>
-              </div>
-              <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto select-all">{geminiEndpointUrl}</pre>
-
-              <div class="flex items-center justify-between text-[11px] text-white/50 pt-2">
-                <span>2. Advanced Settings / Client Secret (Your API Key):</span>
-                <button
-                  onclick={() => handleCopy(tokenDisplay, 'gemini_token')}
-                  class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  {#if copiedField === 'gemini_token'}
-                    <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied Key!</span>
-                  {:else}
-                    <Copy size={12} /> <span>Copy Key</span>
-                  {/if}
-                </button>
-              </div>
-              <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto select-all">{tokenDisplay}</pre>
             </div>
           </div>
 
@@ -359,7 +346,7 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
                 class="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
               >
                 {#if copiedField === 'cursor_config'}
-                  <Check size={13} /> <span>Copied Config!</span>
+                  <Check size={13} /> <span>Copied mcp.json!</span>
                 {:else}
                   <Copy size={13} /> <span>Copy mcp.json</span>
                 {/if}
@@ -371,14 +358,24 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-between pt-3 border-t border-white/10 font-['IBM_Plex_Mono',monospace]">
-        <div class="text-[11px] text-white/50 flex items-center gap-1.5">
-          <Server size={13} class="text-amber-400" />
-          <span>Active Token: <strong class="text-amber-300">{tokenDisplay}</strong></span>
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/10 font-['IBM_Plex_Mono',monospace]">
+        <div class="flex items-center gap-2">
+          <button
+            onclick={generateFreshToken}
+            disabled={isGeneratingToken}
+            class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-amber-400 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            {#if isGeneratingToken}
+              <Loader2 size={13} class="animate-spin" /> <span>Generating Fresh Key...</span>
+            {:else}
+              <KeyRound size={13} /> <span>⚡ Generate Fresh Key</span>
+            {/if}
+          </button>
         </div>
+
         <button
           onclick={close}
-          class="px-5 py-2 text-xs font-bold rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+          class="px-5 py-2 text-xs font-bold rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer shrink-0"
         >
           Close
         </button>
