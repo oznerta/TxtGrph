@@ -8,13 +8,13 @@
   import AdvancedExportModal from '$lib/components/workspace/AdvancedExportModal.svelte';
   import ShareModal from '$lib/components/workspace/ShareModal.svelte';
   import TemplatesModal from '$lib/components/workspace/TemplatesModal.svelte';
-  import FolderTree from '$lib/components/workspace/FolderTree.svelte';
   import DiagramThumbnail from '$lib/components/workspace/DiagramThumbnail.svelte';
   import ActivePresenceStack from '$lib/components/workspace/ActivePresenceStack.svelte';
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { presenceStore } from '$lib/stores/presenceStore.svelte';
   import {
-    Folder,
+    Folder as FolderIcon,
+    FolderOpen,
     FileText,
     ArrowRight,
     ExternalLink,
@@ -24,6 +24,7 @@
     MessageSquare,
     Eye,
     ChevronRight,
+    ChevronDown,
     Search,
     LayoutGrid,
     List,
@@ -31,7 +32,13 @@
     ArrowLeft,
     LogIn,
     Share2,
-    Check
+    Check,
+    User,
+    Users,
+    LayoutDashboard,
+    Menu,
+    Settings,
+    Heart
   } from 'lucide-svelte';
 
   let { data }: { data: PageData } = $props();
@@ -46,6 +53,9 @@
   let searchQuery = $state('');
   let viewMode = $state<'grid' | 'list'>('grid');
   let sidebarOpen = $state(true);
+
+  // Expanded Tree Folder IDs
+  let expandedFolderIds = $state<Set<string>>(new Set());
 
   // Modals
   let versionHistoryModalOpen = $state(false);
@@ -63,6 +73,43 @@
       code = data.diagram.code;
       title = data.diagram.title;
     }
+
+    // Auto expand tree folders on load/navigate
+    const ids = new Set<string>();
+    if (data.rootFolder?.id) ids.add(data.rootFolder.id);
+    if (data.folder?.id) ids.add(data.folder.id);
+    if (data.currentFolder?.id) ids.add(data.currentFolder.id);
+    if (data.type === 'diagram' && data.diagram?.folderId) ids.add(data.diagram.folderId);
+    if (data.treeFolders) {
+      data.treeFolders.forEach((f: any) => ids.add(f.id));
+    }
+    expandedFolderIds = ids;
+  });
+
+  function toggleFolderExpand(folderId: string) {
+    const next = new Set(expandedFolderIds);
+    if (next.has(folderId)) {
+      next.delete(folderId);
+    } else {
+      next.add(folderId);
+    }
+    expandedFolderIds = next;
+  }
+
+  function getChildFolders(parentId: string) {
+    if (!data.treeFolders) return [];
+    return data.treeFolders.filter((f: any) => f.parentId === parentId);
+  }
+
+  function getFolderDiagrams(folderId: string) {
+    if (!data.allTreeDiagrams) return [];
+    return data.allTreeDiagrams.filter((d: any) => d.folderId === folderId);
+  }
+
+  let topLevelTreeFolders = $derived.by(() => {
+    if (!data.treeFolders || data.treeFolders.length === 0) return [];
+    const allIds = new Set(data.treeFolders.map((f: any) => f.id));
+    return data.treeFolders.filter((f: any) => !f.parentId || !allIds.has(f.parentId));
   });
 
   onMount(async () => {
@@ -159,75 +206,165 @@
     if (!data.subFolders) return [];
     if (!searchQuery.trim()) return data.subFolders;
     const q = searchQuery.toLowerCase();
-    return data.subFolders.filter((f) => f.name.toLowerCase().includes(q));
+    return data.subFolders.filter((f: any) => f.name.toLowerCase().includes(q));
   });
 
   let filteredDiagrams = $derived.by(() => {
     if (!data.diagrams) return [];
     if (!searchQuery.trim()) return data.diagrams;
     const q = searchQuery.toLowerCase();
-    return data.diagrams.filter((d) => d.title.toLowerCase().includes(q) || d.code.toLowerCase().includes(q));
+    return data.diagrams.filter((d: any) => d.title.toLowerCase().includes(q) || d.code.toLowerCase().includes(q));
   });
 </script>
 
-<div class="h-screen w-screen flex bg-[#090A0F] overflow-hidden select-none font-['Instrument_Sans',sans-serif]">
-  <!-- Left Navigation Sidebar (Shared Tree View) -->
-  {#if sidebarOpen && data.treeFolders && data.treeFolders.length > 0}
-    <div class="w-64 shrink-0 h-full border-r border-white/10 bg-[#0F1117] flex flex-col">
-      <!-- Brand & Space Header -->
-      <div class="p-4 border-b border-white/10 flex items-center justify-between">
-        <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-xs">
-            TG
-          </div>
-          <div>
-            <h2 class="text-sm font-bold text-white tracking-tight">Public Workspace</h2>
-            <p class="text-[10px] text-emerald-400 font-['IBM_Plex_Mono',monospace]">
-              {data.rootFolder?.name || 'Shared Folder'}
-            </p>
-          </div>
-        </div>
-      </div>
+{#snippet sharedFolderTreeItem(folder: any, depth: number)}
+  {@const isExpanded = expandedFolderIds.has(folder.id)}
+  {@const subFolders = getChildFolders(folder.id)}
+  {@const diagrams = getFolderDiagrams(folder.id)}
+  {@const isCurrentFolder = data.type === 'folder' && data.folder?.id === folder.id}
 
-      <!-- Collapsible Sidebar Tree -->
-      <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-        <div class="px-2 py-1.5 text-[10px] font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
-          Shared Tree Navigation
-        </div>
+  <div class="space-y-0.5">
+    <div class="group relative flex items-center justify-between px-2 py-1.5 rounded-xl cursor-pointer transition-all {isCurrentFolder ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold shadow-sm' : 'text-white/70 hover:bg-white/10 hover:text-white'}">
+      <a
+        href={`/share/${folder.shareToken || folder.id}`}
+        onclick={() => toggleFolderExpand(folder.id)}
+        class="flex items-center gap-1.5 flex-1 truncate text-left"
+      >
+        {#if subFolders.length > 0 || diagrams.length > 0}
+          {#if isExpanded}
+            <ChevronDown size={13} class="shrink-0 text-white/50" />
+            <FolderOpen size={14} class="shrink-0 text-amber-400" />
+          {:else}
+            <ChevronRight size={13} class="shrink-0 text-white/50" />
+            <FolderIcon size={14} class="shrink-0 text-amber-400/70" />
+          {/if}
+        {:else}
+          <FolderIcon size={14} class="shrink-0 text-amber-400/70 ml-4" />
+        {/if}
+        <span class="truncate font-medium text-xs">{folder.name}</span>
+        {#if folder.isShared}
+          <span class="ml-1 inline-flex items-center gap-0.5 rounded bg-sky-500/20 px-1 py-0.5 text-[9px] font-bold text-sky-300 border border-sky-500/30 shrink-0" title="Shared space">
+            <Users size={10} />
+          </span>
+        {/if}
+      </a>
+    </div>
 
-        {#each data.treeFolders as treeFolder (treeFolder.id)}
+    {#if isExpanded}
+      <div class="pl-3.5 space-y-0.5 border-l border-white/10 ml-2.5 my-0.5">
+        {#each subFolders as childFolder (childFolder.id)}
+          {@render sharedFolderTreeItem(childFolder, depth + 1)}
+        {/each}
+
+        {#each diagrams as diagram (diagram.id)}
+          {@const isDiagramActive = data.type === 'diagram' && data.diagram?.id === diagram.id}
           <a
-            href={`/share/${treeFolder.shareToken || treeFolder.id}`}
-            class={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
-              data.folder?.id === treeFolder.id
-                ? 'bg-amber-500/15 border border-amber-500/30 text-amber-300 shadow-sm'
-                : 'text-white/70 hover:text-white hover:bg-white/5'
-            }`}
+            href={`/share/${diagram.shareToken || diagram.id}`}
+            class="group flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs transition-all {isDiagramActive ? 'bg-white/15 text-white font-bold border-l-2 border-amber-400 shadow-sm' : 'text-white/60 hover:bg-white/10 hover:text-white'}"
           >
-            <Folder size={15} class="text-amber-400 shrink-0" />
-            <span class="truncate flex-1">{treeFolder.name}</span>
+            <FileText size={13} class="shrink-0 {isDiagramActive ? 'text-amber-400' : 'text-white/40'}" />
+            <span class="truncate">{diagram.title}</span>
           </a>
         {/each}
       </div>
+    {/if}
+  </div>
+{/snippet}
 
-      <!-- User Account / Login CTA Footer -->
-      <div class="p-3 border-t border-white/10 bg-[#0A0B0E]">
+<div class="h-screen w-screen flex bg-[#090A0F] overflow-hidden select-none font-['Instrument_Sans',sans-serif]">
+  <!-- Left Navigation Sidebar (Production Parity Shared Tree View) -->
+  {#if sidebarOpen}
+    <div class="w-64 shrink-0 h-full border-r border-white/10 bg-[#000000] flex flex-col select-none text-white/80 font-['Instrument_Sans',sans-serif]">
+      <!-- Top Sidebar Header with Hamburger & Logo -->
+      <div class="h-14 px-4 border-b border-white/10 flex items-center gap-3 shrink-0">
+        <button
+          onclick={() => (sidebarOpen = !sidebarOpen)}
+          title="Toggle Sidebar"
+          class="p-1.5 -ml-1 rounded-xl hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
+        >
+          <Menu size={18} />
+        </button>
+
+        <a href="/" class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-xs shadow-sm">
+            TG
+          </div>
+          <span class="font-['Instrument_Sans',sans-serif] text-[16px] font-bold text-white tracking-tight">
+            TxtGrph
+          </span>
+        </a>
+      </div>
+
+      <!-- Sidebar Body Navigation Items -->
+      <div class="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-6 text-[13px] custom-scrollbar">
+        <!-- Section: YOUR SPACE / SHARED SPACE -->
+        <div class="space-y-1">
+          <div class="px-2 py-1 text-[10.5px] font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
+            Shared Space
+          </div>
+
+          <!-- Dashboard Link -->
+          <a
+            href={data.isLoggedIn ? '/workspace' : '/'}
+            class="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-white/60 hover:bg-white/10 hover:text-white transition-all font-semibold"
+          >
+            <LayoutDashboard size={16} class="text-white/50" />
+            <span>{data.isLoggedIn ? 'My Dashboard' : 'Explore TxtGrph'}</span>
+          </a>
+
+          <!-- Public Shared Tree Navigation -->
+          <div class="space-y-0.5 pt-1">
+            <div class="flex items-center gap-2 px-3 py-2 rounded-xl text-white/80 font-semibold">
+              <Users size={16} class="text-amber-400 shrink-0" />
+              <span class="truncate">{data.rootFolder?.name || 'Public Workspace'}</span>
+            </div>
+
+            <!-- Recursive Tree List -->
+            <div class="pl-2 pt-0.5">
+              {#each topLevelTreeFolders as topFolder (topFolder.id)}
+                {@render sharedFolderTreeItem(topFolder, 0)}
+              {/each}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- User Account / Login Footer Card (Matching Dashboard Parity) -->
+      <div class="p-3 border-t border-white/10 bg-[#0A0B0E] shrink-0">
         {#if data.isLoggedIn}
-          <a
-            href="/workspace"
-            class="w-full py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-colors flex items-center justify-center gap-2 border border-white/15 cursor-pointer"
-          >
-            <span>Go to My Workspace</span>
-            <ArrowRight size={14} />
-          </a>
+          <div class="flex items-center justify-between p-2 rounded-xl bg-white/5 border border-white/10">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-xl bg-amber-500 text-black font-bold text-xs flex items-center justify-center shrink-0">
+                {data.userEmail ? data.userEmail.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div class="min-w-0">
+                <p class="text-xs font-bold text-white truncate">
+                  {data.userEmail ? data.userEmail.split('@')[0] : 'User'}
+                </p>
+                <p class="text-[10px] text-white/50 truncate">
+                  {data.userRole === 'editor' ? 'Editor' : 'Viewer'}
+                </p>
+              </div>
+            </div>
+            <a
+              href="/workspace"
+              class="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+              title="Go to Workspace Settings"
+            >
+              <Settings size={15} />
+            </a>
+          </div>
         {:else}
-          <a
-            href="/auth/login"
-            class="w-full py-2 px-3 rounded-xl bg-white text-black hover:bg-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-2 shadow-md cursor-pointer"
-          >
-            <LogIn size={14} />
-            <span>Log In to TxtGrph</span>
-          </a>
+          <div class="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2 text-center">
+            <p class="text-xs text-white/70 font-medium">Want to edit & create diagrams?</p>
+            <a
+              href="/auth/login"
+              class="w-full py-2 px-3 rounded-xl bg-white text-black hover:bg-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-2 shadow-md cursor-pointer"
+            >
+              <LogIn size={14} />
+              <span>Log In to TxtGrph</span>
+            </a>
+          </div>
         {/if}
       </div>
     </div>
@@ -278,19 +415,29 @@
             {/if}
           </div>
 
-          <!-- Right Action Bar -->
+          <!-- Actions & Account Header -->
           <div class="flex items-center gap-3">
-            {#if data.isLoggedIn}
-              <a
-                href="/workspace"
-                class="px-4 py-2 text-xs font-semibold rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors border border-white/15"
+            {#if showForkSuccess}
+              <span class="inline-flex items-center gap-1 text-xs text-emerald-400 font-semibold animate-in fade-in">
+                <Check size={14} /> Forked to your workspace!
+              </span>
+            {/if}
+
+            {#if data.allowForking}
+              <button
+                onclick={handleForkDiagram}
+                class="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Fork diagram to your personal account"
               >
-                My Workspace
-              </a>
-            {:else}
+                <GitFork size={14} />
+                <span>Fork to My Workspace</span>
+              </button>
+            {/if}
+
+            {#if !data.isLoggedIn}
               <a
                 href="/auth/login"
-                class="px-4 py-2 text-xs font-bold rounded-xl bg-white text-black hover:bg-slate-200 transition-colors shadow-md"
+                class="px-3.5 py-1.5 rounded-xl bg-white text-black hover:bg-slate-200 text-xs font-bold transition-colors cursor-pointer"
               >
                 Log In / Sign Up
               </a>
@@ -298,115 +445,136 @@
           </div>
         </header>
 
-        <!-- Search Bar & View Mode Controls -->
-        <div class="px-8 pt-6 pb-2 flex items-center justify-between gap-4 shrink-0">
-          <div class="relative max-w-md w-full">
-            <Search size={16} class="absolute left-3.5 top-3 text-white/40" />
-            <input
-              type="text"
-              bind:value={searchQuery}
-              placeholder="Search diagrams or sub-folders..."
-              class="w-full h-10 pl-10 pr-4 text-xs rounded-xl bg-[#141622] border border-white/15 text-white placeholder-white/40 focus:outline-none focus:border-amber-400/60 font-['IBM_Plex_Mono',monospace] transition-colors"
-            />
+        <!-- Sub-folder Gallery & Diagram Cards Content -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+          <!-- Search & Layout Controls -->
+          <div class="flex items-center justify-between gap-4">
+            <div class="relative flex-1 max-w-md">
+              <Search size={15} class="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40" />
+              <input
+                type="text"
+                placeholder="Search diagrams or sub-folders..."
+                bind:value={searchQuery}
+                class="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-white placeholder-white/40 focus:outline-none focus:border-amber-400/50 transition-colors font-['IBM_Plex_Mono',monospace]"
+              />
+            </div>
+
+            <div class="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
+              <button
+                onclick={() => (viewMode = 'grid')}
+                class={`p-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-white/20 text-white' : 'text-white/40 hover:text-white'}`}
+                title="Grid view"
+              >
+                <LayoutGrid size={15} />
+              </button>
+              <button
+                onclick={() => (viewMode = 'list')}
+                class={`p-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-white/20 text-white' : 'text-white/40 hover:text-white'}`}
+                title="List view"
+              >
+                <List size={15} />
+              </button>
+            </div>
           </div>
 
-          <div class="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/10">
-            <button
-              onclick={() => (viewMode = 'grid')}
-              class={`p-2 rounded-lg transition-colors cursor-pointer ${viewMode === 'grid' ? 'bg-white/20 text-white' : 'text-white/40 hover:text-white'}`}
-              title="Grid View"
-            >
-              <LayoutGrid size={15} />
-            </button>
-            <button
-              onclick={() => (viewMode = 'list')}
-              class={`p-2 rounded-lg transition-colors cursor-pointer ${viewMode === 'list' ? 'bg-white/20 text-white' : 'text-white/40 hover:text-white'}`}
-              title="List View"
-            >
-              <List size={15} />
-            </button>
-          </div>
-        </div>
-
-        <!-- Main Gallery Scroll Container -->
-        <div class="flex-1 overflow-y-auto custom-scrollbar px-8 py-4 space-y-8">
           <!-- Sub-Folders Section -->
-          {#if filteredSubFolders && filteredSubFolders.length > 0}
-            <div>
-              <div class="mb-3.5 flex items-center justify-between">
-                <h2 class="text-xs font-bold uppercase text-white/40 tracking-wider font-['IBM_Plex_Mono',monospace]">
-                  Folders ({filteredSubFolders.length})
-                </h2>
-              </div>
+          {#if filteredSubFolders.length > 0}
+            <div class="space-y-3">
+              <h3 class="text-xs font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
+                Folders ({filteredSubFolders.length})
+              </h3>
 
-              <div class={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5' : 'space-y-2'}>
+              <div class={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4' : 'space-y-2'}>
                 {#each filteredSubFolders as subFolder (subFolder.id)}
                   <a
                     href={`/share/${subFolder.shareToken || subFolder.id}`}
-                    class="group flex items-center justify-between rounded-2xl border border-white/10 bg-[#12141D] hover:bg-[#181B27] hover:border-amber-500/40 p-4 transition-all shadow-md cursor-pointer"
+                    class="group p-4 rounded-2xl bg-[#0F1117] border border-white/10 hover:border-amber-500/40 hover:bg-[#141722] transition-all flex items-center justify-between shadow-lg"
                   >
-                    <div class="flex items-center gap-3 truncate">
-                      <div class="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                        <Folder size={18} />
+                    <div class="flex items-center gap-3 min-w-0">
+                      <div class="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                        <FolderIcon size={20} />
                       </div>
-                      <div>
-                        <span class="font-bold text-xs text-white group-hover:text-amber-400 transition-colors block truncate">
+                      <div class="min-w-0">
+                        <h4 class="text-xs font-bold text-white group-hover:text-amber-300 transition-colors truncate">
                           {subFolder.name}
-                        </span>
-                        <span class="text-[10px] text-white/40 font-['IBM_Plex_Mono',monospace]">Sub-folder</span>
+                        </h4>
+                        <p class="text-[10px] text-white/40 font-['IBM_Plex_Mono',monospace]">Sub-folder</p>
                       </div>
                     </div>
-                    <ArrowRight size={15} class="text-white/30 group-hover:text-amber-400 group-hover:translate-x-1 transition-all shrink-0 ml-2" />
+                    <ChevronRight size={16} class="text-white/30 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all shrink-0" />
                   </a>
                 {/each}
               </div>
             </div>
           {/if}
 
-          <!-- Diagrams Section with Live SVG Thumbnails -->
-          <div>
-            <div class="mb-3.5 flex items-center justify-between">
-              <h2 class="text-xs font-bold uppercase text-white/40 tracking-wider font-['IBM_Plex_Mono',monospace]">
-                Diagrams ({filteredDiagrams.length})
-              </h2>
-            </div>
+          <!-- Diagrams Gallery Section -->
+          <div class="space-y-3">
+            <h3 class="text-xs font-bold text-white/40 uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
+              Diagrams ({filteredDiagrams.length})
+            </h3>
 
-            {#if filteredDiagrams.length === 0 && (!filteredSubFolders || filteredSubFolders.length === 0)}
-              <div class="rounded-2xl border border-white/10 bg-white/[0.02] p-16 text-center">
-                <FileText class="w-12 h-12 text-white/20 mx-auto mb-3" />
-                <h3 class="text-sm font-semibold text-white">No diagrams found in this folder</h3>
-                <p class="text-xs text-white/40 mt-1">Diagrams added to this folder will automatically appear here.</p>
+            {#if filteredDiagrams.length === 0}
+              <div class="p-12 text-center rounded-3xl border border-dashed border-white/10 bg-white/[0.02]">
+                <FileText size={32} class="mx-auto text-white/20 mb-3" />
+                <p class="text-xs text-white/40 font-['IBM_Plex_Mono',monospace]">
+                  No diagrams found in this folder.
+                </p>
               </div>
-            {:else}
-              <div class={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4' : 'space-y-2.5'}>
+            {:else if viewMode === 'grid'}
+              <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
                 {#each filteredDiagrams as diagram (diagram.id)}
                   <a
                     href={`/share/${diagram.shareToken || diagram.id}`}
-                    class="group rounded-2xl border border-white/10 bg-[#12141D] hover:bg-[#181B27] hover:border-amber-500/40 overflow-hidden transition-all shadow-lg flex flex-col cursor-pointer"
+                    class="group rounded-2xl bg-[#0F1117] border border-white/10 hover:border-amber-500/40 overflow-hidden flex flex-col transition-all shadow-xl hover:-translate-y-0.5"
                   >
-                    <!-- Live SVG Diagram Thumbnail -->
-                    <div class="h-36 w-full relative overflow-hidden bg-[#0A0B0E] border-b border-white/10">
-                      <DiagramThumbnail code={diagram.code} />
-                      <div class="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-amber-400 border border-amber-400/30">
-                        <ExternalLink size={14} />
-                      </div>
+                    <!-- Live SVG Diagram Preview Thumbnail -->
+                    <div class="h-40 bg-[#06070A] relative flex items-center justify-center p-3 overflow-hidden border-b border-white/10">
+                      <DiagramThumbnail code={diagram.code} title={diagram.title} />
                     </div>
 
-                    <!-- Card Header Info -->
-                    <div class="p-4 flex-1 flex flex-col justify-between">
+                    <div class="p-4 flex flex-col justify-between flex-1">
                       <div>
-                        <h3 class="font-bold text-sm text-white group-hover:text-amber-400 transition-colors line-clamp-1">
+                        <h4 class="text-xs font-bold text-white group-hover:text-amber-300 transition-colors line-clamp-1">
                           {diagram.title}
-                        </h3>
-                        <p class="text-[11px] text-white/40 font-['IBM_Plex_Mono',monospace] mt-1">
+                        </h4>
+                        <p class="text-[10px] text-white/40 mt-1 font-['IBM_Plex_Mono',monospace]">
                           Updated {new Date(diagram.updatedAt).toLocaleDateString()}
                         </p>
                       </div>
 
-                      <div class="flex items-center justify-between pt-3 mt-3 border-t border-white/5 text-[11px] text-white/50 font-['IBM_Plex_Mono',monospace]">
-                        <span class="group-hover:text-amber-400 transition-colors">Open Diagram</span>
-                        <ArrowRight size={13} class="group-hover:translate-x-1 transition-transform text-amber-400" />
+                      <div class="mt-4 flex items-center justify-between text-[11px] text-amber-400 font-semibold pt-2 border-t border-white/5">
+                        <span>Open Diagram</span>
+                        <ArrowRight size={13} class="group-hover:translate-x-1 transition-transform" />
                       </div>
+                    </div>
+                  </a>
+                {/each}
+              </div>
+            {:else}
+              <div class="space-y-2">
+                {#each filteredDiagrams as diagram (diagram.id)}
+                  <a
+                    href={`/share/${diagram.shareToken || diagram.id}`}
+                    class="group p-3.5 rounded-2xl bg-[#0F1117] border border-white/10 hover:border-amber-500/40 hover:bg-[#141722] transition-all flex items-center justify-between shadow-lg"
+                  >
+                    <div class="flex items-center gap-3.5 min-w-0">
+                      <div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 text-amber-400 flex items-center justify-center shrink-0">
+                        <FileText size={18} />
+                      </div>
+                      <div class="min-w-0">
+                        <h4 class="text-xs font-bold text-white group-hover:text-amber-300 transition-colors truncate">
+                          {diagram.title}
+                        </h4>
+                        <p class="text-[10px] text-white/40 font-['IBM_Plex_Mono',monospace]">
+                          Updated {new Date(diagram.updatedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div class="flex items-center gap-2 text-xs text-amber-400 font-semibold">
+                      <span>View</span>
+                      <ArrowRight size={14} class="group-hover:translate-x-0.5 transition-transform" />
                     </div>
                   </a>
                 {/each}
@@ -416,83 +584,89 @@
         </div>
       </div>
     {:else}
-      <!-- Diagram Canvas View -->
-      <div class="flex-1 flex flex-col min-h-0 relative">
-        <!-- Fork Success Toast -->
-        {#if showForkSuccess}
-          <div class="fixed top-16 left-1/2 -translate-x-1/2 z-[200] px-4 py-2.5 rounded-2xl bg-[#0F1117]/95 border border-emerald-500/30 text-emerald-400 font-semibold text-xs shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 duration-200 backdrop-blur-xl font-['Instrument_Sans',sans-serif]">
-            <Check size={16} class="text-emerald-400 shrink-0" />
-            <span>Diagram forked to your personal workspace!</span>
-          </div>
-        {/if}
-
-        <DiagramCanvas
-          code={code}
-          title={title}
-          readOnly={!isEditable}
-          saveStatus={saveStatus}
-          isFavorite={isFavorite}
-          allowComments={data.allowComments}
-          allowTimeline={data.allowTimeline}
-          allowForking={data.allowForking}
-          isLoggedIn={data.isLoggedIn}
-          onCodeChange={handleCodeChange}
-          onTitleChange={handleTitleChange}
-          onToggleFavorite={() => (isFavorite = !isFavorite)}
-          onOpenComments={() => (commentsModalOpen = true)}
-          onOpenHistory={() => (versionHistoryModalOpen = true)}
-          onOpenShare={() => (shareModalOpen = true)}
-          onOpenExport={() => (advancedExportModalOpen = true)}
-          onOpenTemplates={() => (templatesModalOpen = true)}
-          onFork={handleForkDiagram}
-        />
-      </div>
-
-      {#if data.diagram?.id}
-        <VersionHistoryModal
-          open={versionHistoryModalOpen}
-          diagramId={data.diagram.id}
-          currentCode={code}
-          userEmail={data.userEmail || ''}
-          onRestore={(historicCode: string) => {
-            if (isEditable) {
-              handleCodeChange(historicCode);
-              versionHistoryModalOpen = false;
-            }
-          }}
-          onclose={() => (versionHistoryModalOpen = false)}
-        />
-
-        <CommentsModal
-          open={commentsModalOpen}
-          diagramId={data.diagram.id}
-          userEmail={data.userEmail || ''}
-          onclose={() => (commentsModalOpen = false)}
-        />
-      {/if}
-
-      <AdvancedExportModal
-        open={advancedExportModalOpen}
-        code={code}
-        title={title}
-        onclose={() => (advancedExportModalOpen = false)}
+      <!-- Shared Diagram View with DiagramCanvas -->
+      <DiagramCanvas
+        bind:code
+        {title}
+        readOnly={!isEditable}
+        {saveStatus}
+        {isFavorite}
+        spaceName={data.rootFolder?.name || 'Shared Space'}
+        folderName={data.currentFolder?.name}
+        isSharedSpace={true}
+        allowComments={data.allowComments}
+        allowTimeline={data.allowTimeline}
+        allowForking={data.allowForking}
+        isLoggedIn={data.isLoggedIn}
+        onToggleSidebar={() => (sidebarOpen = !sidebarOpen)}
+        onCodeChange={handleCodeChange}
+        onTitleChange={handleTitleChange}
+        onOpenComments={() => (commentsModalOpen = true)}
+        onOpenHistory={() => (versionHistoryModalOpen = true)}
+        onOpenShare={() => (shareModalOpen = true)}
+        onOpenExport={() => (advancedExportModalOpen = true)}
+        onOpenTemplates={() => (templatesModalOpen = true)}
+        onFork={handleForkDiagram}
       />
-
-      {#if isEditable && data.diagram?.id}
-        <ShareModal
-          open={shareModalOpen}
-          diagram={{ id: data.diagram.id, userId: '', folderId: null, title, code, shareToken: data.diagram.shareToken, createdAt: data.diagram.updatedAt, updatedAt: data.diagram.updatedAt, isShared: true, isDeleted: false, config: {} }}
-          onclose={() => (shareModalOpen = false)}
-        />
-
-        <TemplatesModal
-          open={templatesModalOpen}
-          onSelectTemplate={(tmplCode, tmplTitle) => {
-            handleCodeChange(tmplCode);
-          }}
-          onclose={() => (templatesModalOpen = false)}
-        />
-      {/if}
     {/if}
   </main>
 </div>
+
+<!-- Active Presence Stack Floating Widget -->
+{#if data.type === 'diagram'}
+  <div class="fixed bottom-4 right-4 z-50">
+    <ActivePresenceStack />
+  </div>
+{/if}
+
+<!-- Modals -->
+{#if versionHistoryModalOpen && data.type === 'diagram'}
+  <VersionHistoryModal
+    diagramId={data.diagram.id}
+    onClose={() => (versionHistoryModalOpen = false)}
+    onRestore={(restoredCode) => {
+      code = restoredCode;
+      handleCodeChange(restoredCode);
+      versionHistoryModalOpen = false;
+    }}
+  />
+{/if}
+
+{#if commentsModalOpen && data.type === 'diagram'}
+  <CommentsModal
+    diagramId={data.diagram.id}
+    userRole={data.userRole}
+    userEmail={data.userEmail}
+    onClose={() => (commentsModalOpen = false)}
+  />
+{/if}
+
+{#if advancedExportModalOpen && data.type === 'diagram'}
+  <AdvancedExportModal
+    {code}
+    {title}
+    onClose={() => (advancedExportModalOpen = false)}
+  />
+{/if}
+
+{#if shareModalOpen}
+  <ShareModal
+    targetItem={data.type === 'diagram' ? { type: 'diagram', id: data.diagram.id, title: data.diagram.title, shareToken: data.diagram.shareToken, publicAccessRole: data.userRole } : { type: 'folder', id: data.folder.id, name: data.folder.name, shareToken: data.folder.shareToken, publicAccessRole: data.userRole }}
+    userEmail={data.userEmail}
+    onClose={() => (shareModalOpen = false)}
+    onUpdated={() => {}}
+  />
+{/if}
+
+{#if templatesModalOpen}
+  <TemplatesModal
+    onClose={() => (templatesModalOpen = false)}
+    onSelectTemplate={(templateCode) => {
+      if (isEditable) {
+        code = templateCode;
+        handleCodeChange(templateCode);
+      }
+      templatesModalOpen = false;
+    }}
+  />
+{/if}

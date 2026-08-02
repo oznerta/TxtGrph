@@ -71,6 +71,7 @@ export const load: PageLoad = async ({ params }) => {
 
       // Fetch parent folder tree if diagram belongs to a folder
       let treeFolders: any[] = [];
+      let allTreeDiagrams: any[] = [];
       let rootFolder: any = null;
       let currentFolder: any = null;
 
@@ -128,6 +129,26 @@ export const load: PageLoad = async ({ params }) => {
           createdAt: f.updated_at,
           updatedAt: f.updated_at
         }));
+
+        const { data: dbDiagrams } = await supabase
+          .from('diagrams')
+          .select('id, user_id, folder_id, share_token, title, code, config, updated_at')
+          .in('folder_id', allFolderIds)
+          .eq('is_deleted', false);
+
+        allTreeDiagrams = (dbDiagrams || []).map((d: any) => ({
+          id: d.id,
+          userId: d.user_id,
+          folderId: d.folder_id,
+          shareToken: d.share_token,
+          title: d.title,
+          code: d.code,
+          config: d.config || {},
+          isShared: true,
+          isDeleted: false,
+          createdAt: d.updated_at,
+          updatedAt: d.updated_at
+        }));
       }
 
       const config = (diagramData.config || {}) as any;
@@ -141,6 +162,7 @@ export const load: PageLoad = async ({ params }) => {
         rootFolder,
         currentFolder,
         treeFolders,
+        allTreeDiagrams,
         userRole: effectiveRole,
         userEmail,
         isLoggedIn: !!userId,
