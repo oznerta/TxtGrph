@@ -302,20 +302,24 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
         {:else if activeTab === 'gemini'}
           <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-amber-400 font-['IBM_Plex_Mono',monospace]">Gemini AI & Google Agent Connector</span>
+              <span class="text-xs font-bold text-amber-400 font-['IBM_Plex_Mono',monospace]">Gemini Spark Custom Connected App</span>
               <a
-                href="https://gemini.google.com"
+                href="https://gemini.google.com/spark/apps"
                 target="_blank"
                 class="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
               >
-                <span>Launch Gemini AI</span>
+                <span>Launch Gemini Spark Apps</span>
                 <ExternalLink size={13} />
               </a>
             </div>
 
+            <p class="text-xs text-white/70 leading-relaxed">
+              Connect TxtGrph to Gemini Spark via Google's Custom Connected Apps interface.
+            </p>
+
             <div class="space-y-2 font-['IBM_Plex_Mono',monospace]">
               <div class="flex items-center justify-between text-[11px] text-white/50">
-                <span>1. Gemini MCP Endpoint:</span>
+                <span>1. Add custom app link (Paste into Gemini Spark):</span>
                 <button
                   onclick={() => handleCopy(geminiEndpointUrl, 'gemini_endpoint')}
                   class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
@@ -323,26 +327,26 @@ Use TxtGrph MCP tools to list, create, edit, and validate Mermaid syntax diagram
                   {#if copiedField === 'gemini_endpoint'}
                     <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied!</span>
                   {:else}
-                    <Copy size={12} /> <span>Copy Endpoint</span>
+                    <Copy size={12} /> <span>Copy App Link</span>
                   {/if}
                 </button>
               </div>
               <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto select-all">{geminiEndpointUrl}</pre>
 
               <div class="flex items-center justify-between text-[11px] text-white/50 pt-2">
-                <span>2. Gemini Chat Prompt:</span>
+                <span>2. Advanced Settings / Client Secret (Your API Key):</span>
                 <button
-                  onclick={() => handleCopy(geminiChatPrompt, 'gemini_prompt')}
+                  onclick={() => handleCopy(tokenDisplay, 'gemini_token')}
                   class="text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
                 >
-                  {#if copiedField === 'gemini_prompt'}
-                    <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied!</span>
+                  {#if copiedField === 'gemini_token'}
+                    <Check size={12} class="text-emerald-400" /> <span class="text-emerald-400">Copied Key!</span>
                   {:else}
-                    <Copy size={12} /> <span>Copy Chat Prompt</span>
+                    <Copy size={12} /> <span>Copy Key</span>
                   {/if}
                 </button>
               </div>
-              <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto whitespace-pre-wrap select-all">{geminiChatPrompt}</pre>
+              <pre class="p-2.5 rounded-xl bg-black/60 border border-white/5 text-[11px] text-amber-300 overflow-x-auto select-all">{tokenDisplay}</pre>
             </div>
           </div>
 
