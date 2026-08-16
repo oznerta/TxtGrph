@@ -26,13 +26,14 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'create_diagram',
-    description: 'Create a new Mermaid diagram.',
+    description: 'Create a new Mermaid diagram. Supports placing inside a folder by folder_id or folder_name.',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Title of the diagram.' },
         code: { type: 'string', description: 'Mermaid syntax code string.' },
         folder_id: { type: 'string', description: 'Optional folder UUID.' },
+        folder_name: { type: 'string', description: 'Optional folder name. If specified and folder_id is not provided, the folder will be found or automatically created.' },
         config: { type: 'object', description: 'Optional JSON config override.' },
       },
       required: ['title', 'code'],
@@ -48,6 +49,7 @@ export const TOOL_DEFINITIONS = [
         title: { type: 'string', description: 'Updated title.' },
         code: { type: 'string', description: 'Updated Mermaid syntax code.' },
         folder_id: { type: 'string', description: 'Updated folder UUID or null.' },
+        folder_name: { type: 'string', description: 'Optional folder name to move diagram into. Will be found or created if needed.' },
         config: { type: 'object', description: 'Updated JSON config.' },
       },
       required: ['id'],
@@ -74,12 +76,13 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'create_folder',
-    description: 'Create a new diagram folder.',
+    description: 'Create a new diagram folder (or return existing if already present).',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Name of the folder.' },
         parent_id: { type: 'string', description: 'Optional parent folder UUID for nested folders.' },
+        parent_name: { type: 'string', description: 'Optional parent folder name for nested folders.' },
       },
       required: ['name'],
     },
@@ -152,13 +155,45 @@ export async function handleMcpToolCall(
         if (!args?.title || !args?.code) throw new Error('Missing required params: title, code');
         const sanitizedCode = sanitizeMermaidOutput(args.code);
 
+        let targetFolderId = args.folder_id || null;
+
+        // Auto-resolve or create folder by name if folder_id is not provided
+        if (!targetFolderId && args.folder_name?.trim()) {
+          const folderName = args.folder_name.trim();
+          const { data: existingFolder } = await supabase
+            .from('folders')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('name', folderName)
+            .eq('is_deleted', false)
+            .maybeSingle();
+
+          if (existingFolder?.id) {
+            targetFolderId = existingFolder.id;
+          } else {
+            const { data: newFolder } = await supabase
+              .from('folders')
+              .insert({
+                user_id: userId,
+                name: folderName,
+                is_deleted: false,
+              })
+              .select('id')
+              .single();
+
+            if (newFolder?.id) {
+              targetFolderId = newFolder.id;
+            }
+          }
+        }
+
         const { data, error } = await supabase
           .from('diagrams')
           .insert({
             user_id: userId,
             title: args.title.trim(),
             code: sanitizedCode,
-            folder_id: args.folder_id || null,
+            folder_id: targetFolderId,
             config: args.config || {},
             is_deleted: false,
           })
@@ -180,6 +215,35 @@ export async function handleMcpToolCall(
         if (args.code) updatePayload.code = sanitizeMermaidOutput(args.code);
         if (args.folder_id !== undefined) updatePayload.folder_id = args.folder_id;
         if (args.config) updatePayload.config = args.config;
+
+        if (args.folder_name?.trim() && args.folder_id === undefined) {
+          const folderName = args.folder_name.trim();
+          const { data: existingFolder } = await supabase
+            .from('folders')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('name', folderName)
+            .eq('is_deleted', false)
+            .maybeSingle();
+
+          if (existingFolder?.id) {
+            updatePayload.folder_id = existingFolder.id;
+          } else {
+            const { data: newFolder } = await supabase
+              .from('folders')
+              .insert({
+                user_id: userId,
+                name: folderName,
+                is_deleted: false,
+              })
+              .select('id')
+              .single();
+
+            if (newFolder?.id) {
+              updatePayload.folder_id = newFolder.id;
+            }
+          }
+        }
 
         const { data, error } = await supabase
           .from('diagrams')
@@ -232,13 +296,52 @@ export async function handleMcpToolCall(
 
       case 'create_folder': {
         if (!args?.name) throw new Error('Missing required param: name');
+        const folderName = args.name.trim();
+        let parentId = args.parent_id || null;
+
+        // Resolve parent_name if supplied
+        if (!parentId && args.parent_name?.trim()) {
+          const { data: parentFolder } = await supabase
+            .from('folders')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('name', args.parent_name.trim())
+            .eq('is_deleted', false)
+            .maybeSingle();
+
+          if (parentFolder?.id) {
+            parentId = parentFolder.id;
+          }
+        }
+
+        // Check if folder already exists
+        let checkQuery = supabase
+          .from('folders')
+          .select('id, name, parent_id, created_at, updated_at')
+          .eq('user_id', userId)
+          .eq('name', folderName)
+          .eq('is_deleted', false);
+
+        if (parentId) {
+          checkQuery = checkQuery.eq('parent_id', parentId);
+        } else {
+          checkQuery = checkQuery.is('parent_id', null);
+        }
+
+        const { data: existing } = await checkQuery.maybeSingle();
+        if (existing) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify(existing, null, 2) }],
+          };
+        }
+
         const { data, error } = await supabase
           .from('folders')
           .insert({
             user_id: userId,
-            name: args.name.trim(),
-            parent_id: args.parent_id || null,
-            is_deleted: false
+            name: folderName,
+            parent_id: parentId,
+            is_deleted: false,
           })
           .select('id, name, parent_id, created_at, updated_at')
           .single();

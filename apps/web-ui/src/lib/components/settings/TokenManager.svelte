@@ -17,7 +17,10 @@
     Cpu,
     ExternalLink,
     Info,
-    CheckCircle2
+    CheckCircle2,
+    FolderPlus,
+    Zap,
+    ArrowRight
   } from 'lucide-svelte';
 
   interface McpTokenRecord {
@@ -136,6 +139,33 @@
     }, 2000);
   }
 
+  let isQuickGenerating = $state(false);
+
+  async function quickGenerateAndCopy() {
+    try {
+      isQuickGenerating = true;
+      if (!createdRawToken) {
+        const res = await fetch('/api/v1/tokens', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: `${activeGuideTab.toUpperCase()} Integration Key` }),
+        });
+        const payload = await res.json();
+        if (res.ok && payload.success && payload.data?.rawToken) {
+          createdRawToken = payload.data.rawToken;
+          await fetchTokens();
+        }
+      }
+      setTimeout(() => {
+        copySnippet();
+      }, 50);
+    } catch (err) {
+      console.error('Quick generation error:', err);
+    } finally {
+      isQuickGenerating = false;
+    }
+  }
+
   const activeTokenDisplay = $derived(
     createdRawToken || (tokens.length > 0 ? `${tokens[0].token_prefix}...` : 'txtgrph_mcp_YOUR_API_KEY')
   );
@@ -170,20 +200,21 @@ Authorization Header: Bearer ${activeTokenDisplay}
 
 Supported Actions:
 - list_diagrams (List your diagrams & code)
-- create_diagram (Generate new Mermaid diagram)
+- create_diagram (Generate new Mermaid diagram in a folder)
 - update_diagram (Update existing diagram)
 - list_folders / create_folder (Manage workspace structure)
 - render_mermaid_svg (Validate & sanitize syntax)`);
 
-  let geminiSnippet = $derived(`JSON-RPC 2.0 Endpoint: ${baseUrl}/api/v1/mcp
-Headers:
-  Authorization: Bearer ${activeTokenDisplay}
-  Content-Type: application/json
-
-Supported Standard Protocol Methods:
-- initialize (Protocol handshake)
-- tools/list (Retrieve available tools)
-- tools/call (Execute diagram & folder actions)`);
+  let geminiSnippet = $derived(`{
+  "mcpServers": {
+    "txtgrph": {
+      "url": "${baseUrl}/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer ${activeTokenDisplay}"
+      }
+    }
+  }
+}`);
 
   function getCurrentSnippet() {
     switch (activeGuideTab) {
@@ -199,7 +230,7 @@ Supported Standard Protocol Methods:
     isSnippetCopied = true;
     setTimeout(() => {
       isSnippetCopied = false;
-    }, 2000);
+    }, 2500);
   }
 
   function formatDate(isoStr: string | null) {
@@ -222,7 +253,7 @@ Supported Standard Protocol Methods:
           <span>Personal Access Tokens (MCP Keys)</span>
         </h3>
         <p class="text-xs text-white/50 mt-0.5">
-          Generate API keys to connect Claude Desktop, Gemini, ChatGPT, Cursor, VS Code, or custom AI agents to TxtGrph.
+          Generate API keys to connect Google Gemini, Claude Desktop, ChatGPT, Cursor, or AI coding assistants to TxtGrph.
         </p>
       </div>
       <button
@@ -247,7 +278,7 @@ Supported Standard Protocol Methods:
       <div class="p-8 text-center border border-dashed border-white/10 rounded-2xl space-y-2 bg-white/[0.01]">
         <div class="text-xs font-bold text-white">No Access Tokens Created</div>
         <p class="text-xs text-white/40 max-w-sm mx-auto">
-          Create an API key to enable AI agents (Claude, Gemini, ChatGPT, Cursor) to view and create diagrams directly in your account.
+          Create an API key to enable AI agents (Gemini, Claude, ChatGPT, Cursor) to view and create diagrams directly in your account.
         </p>
       </div>
     {:else}
@@ -288,7 +319,7 @@ Supported Standard Protocol Methods:
     {/if}
   </div>
 
-  <!-- Production-Grade Multi-Platform MCP Setup Guide -->
+  <!-- Multi-Platform MCP Setup Guide -->
   <div class="p-6 rounded-3xl bg-[#0F111A] border border-white/10 space-y-5 shadow-xl">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div class="flex items-center gap-2.5">
@@ -301,6 +332,12 @@ Supported Standard Protocol Methods:
 
       <!-- Platform Selector Tabs -->
       <div class="flex items-center gap-1 p-1 rounded-xl bg-black/40 border border-white/10 font-['IBM_Plex_Mono',monospace] overflow-x-auto">
+        <button
+          onclick={() => (activeGuideTab = 'gemini')}
+          class="px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer shrink-0 {activeGuideTab === 'gemini' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
+        >
+          Google Gemini / Agents
+        </button>
         <button
           onclick={() => (activeGuideTab = 'claude')}
           class="px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer shrink-0 {activeGuideTab === 'claude' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
@@ -319,45 +356,59 @@ Supported Standard Protocol Methods:
         >
           ChatGPT GPTs
         </button>
-        <button
-          onclick={() => (activeGuideTab = 'gemini')}
-          class="px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors cursor-pointer shrink-0 {activeGuideTab === 'gemini' ? 'bg-amber-400 text-black shadow-sm' : 'text-white/60 hover:text-white'}"
-        >
-          Gemini / Agents
-        </button>
       </div>
     </div>
 
     <!-- Code Snippet Container -->
     <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-3">
-      <div class="flex items-center justify-between text-xs text-white/60 font-['IBM_Plex_Mono',monospace]">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-white/60 font-['IBM_Plex_Mono',monospace]">
         <div class="flex items-center gap-2">
           <Terminal size={14} class="text-amber-400" />
           <span>
             {#if activeGuideTab === 'claude'}
               Config File: <code class="text-amber-300">claude_desktop_config.json</code>
             {:else if activeGuideTab === 'cursor'}
-              Config File: <code class="text-amber-300">.cursor/mcp.json</code> or VS Code Settings
+              Config File: <code class="text-amber-300">.cursor/mcp.json</code> or Settings
             {:else if activeGuideTab === 'chatgpt'}
               OpenAPI Action Config (<a href={`${baseUrl}/api/v1/openapi.json`} target="_blank" class="text-amber-400 underline inline-flex items-center gap-0.5">Open Spec <ExternalLink size={10} /></a>)
             {:else}
-              JSON-RPC 2.0 Standard MCP Protocol Endpoint
+              Config File: <code class="text-amber-300">mcp.json</code> or Antigravity / Gemini CLI Config
             {/if}
           </span>
         </div>
 
-        <button
-          onclick={copySnippet}
-          class="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
-        >
-          {#if isSnippetCopied}
-            <Check size={13} class="text-emerald-400" />
-            <span class="text-emerald-400">Copied!</span>
-          {:else}
-            <Copy size={13} />
-            <span>Copy Configuration</span>
-          {/if}
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            onclick={quickGenerateAndCopy}
+            disabled={isQuickGenerating}
+            class="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-black transition-colors text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+            title="Generate a fresh token and copy the complete configuration to clipboard"
+          >
+            {#if isQuickGenerating}
+              <Loader2 size={13} class="animate-spin text-black" />
+              <span>Generating...</span>
+            {:else if isSnippetCopied}
+              <Check size={13} class="text-black stroke-[3]" />
+              <span>Ready & Copied!</span>
+            {:else}
+              <Zap size={13} class="text-black fill-black" />
+              <span>Auto-Generate & Copy</span>
+            {/if}
+          </button>
+
+          <button
+            onclick={copySnippet}
+            class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
+          >
+            {#if isSnippetCopied}
+              <Check size={13} class="text-emerald-400" />
+              <span class="text-emerald-400">Copied!</span>
+            {:else}
+              <Copy size={13} />
+              <span>Copy Config</span>
+            {/if}
+          </button>
+        </div>
       </div>
 
       <pre class="text-[12px] leading-[22px] font-['IBM_Plex_Mono',monospace] text-amber-300 whitespace-pre font-mono p-4 rounded-xl bg-black/60 border border-white/5 select-all overflow-x-auto">{getCurrentSnippet()}</pre>
@@ -370,10 +421,60 @@ Supported Standard Protocol Methods:
       {:else if activeGuideTab === 'cursor'}
         <p><strong class="text-white">How to connect Cursor / VS Code / Windsurf:</strong> Add the MCP server configuration into your project's <code class="text-amber-300 font-mono">.cursor/mcp.json</code> or global Cursor MCP settings.</p>
       {:else if activeGuideTab === 'chatgpt'}
-        <p><strong class="text-white">How to connect ChatGPT Custom GPTs:</strong> In ChatGPT GPT Builder → Actions → Import from URL, paste <code class="text-amber-300 font-mono">{baseUrl}/api/v1/openapi.json</code>. Set Authentication to Bearer API Token.</p>
+        <p><strong class="text-white">How to connect ChatGPT Custom GPTs:</strong> In ChatGPT GPT Builder → Actions → Import from URL, paste <code class="text-amber-300 font-mono">{baseUrl}/api/v1/openapi.json</code>. Set Authentication to Bearer API Token with your TxtGrph key.</p>
       {:else}
-        <p><strong class="text-white">How to connect Gemini & Custom AI Frameworks:</strong> Point your agent's MCP transport to <code class="text-amber-300 font-mono">{baseUrl}/api/v1/mcp</code> using HTTP Bearer authorization headers.</p>
+        <p><strong class="text-white">How to connect Gemini, Antigravity & AI Frameworks:</strong> Add the MCP server configuration to your Gemini CLI / Antigravity settings. You can also point your Python/Node agent to <code class="text-amber-300 font-mono">{baseUrl}/api/v1/mcp</code> using HTTP Bearer authorization headers.</p>
       {/if}
+    </div>
+  </div>
+
+  <!-- How to Prompt Your AI (Folder & Diagram Creation Examples) -->
+  <div class="p-6 rounded-3xl bg-[#0F111A] border border-white/10 space-y-4 shadow-xl">
+    <div class="flex items-center gap-2.5">
+      <Sparkles size={18} class="text-amber-400 shrink-0" />
+      <div>
+        <h4 class="text-xs font-bold text-white uppercase tracking-wider font-['IBM_Plex_Mono',monospace]">
+          How to Prompt Your AI (Example Workflows)
+        </h4>
+        <p class="text-[11px] text-white/50">
+          Once connected, you can tell Gemini, Claude, or ChatGPT to organize and generate diagrams using natural language.
+        </p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+      <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-2 hover:border-amber-400/30 transition-colors">
+        <div class="flex items-center gap-2 text-xs font-bold text-amber-400">
+          <FolderPlus size={14} />
+          <span>Create Inside Folder</span>
+        </div>
+        <p class="text-xs text-white/80 leading-relaxed font-['IBM_Plex_Mono',monospace] bg-black/40 p-2.5 rounded-xl border border-white/5">
+          "Create a folder named <strong>Payment Flow</strong> and generate a sequence diagram of Stripe checkout inside it."
+        </p>
+        <span class="text-[10px] text-white/40 block">Creates the folder automatically if it doesn't exist and adds the diagram into it.</span>
+      </div>
+
+      <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-2 hover:border-amber-400/30 transition-colors">
+        <div class="flex items-center gap-2 text-xs font-bold text-amber-400">
+          <Code2 size={14} />
+          <span>Update Diagram</span>
+        </div>
+        <p class="text-xs text-white/80 leading-relaxed font-['IBM_Plex_Mono',monospace] bg-black/40 p-2.5 rounded-xl border border-white/5">
+          "Find my diagram <strong>User Auth</strong> and add a 2FA email verification step to it."
+        </p>
+        <span class="text-[10px] text-white/40 block">Reads your existing diagram code, updates the Mermaid syntax, and saves it.</span>
+      </div>
+
+      <div class="p-4 rounded-2xl bg-[#07080C] border border-white/10 space-y-2 hover:border-amber-400/30 transition-colors">
+        <div class="flex items-center gap-2 text-xs font-bold text-amber-400">
+          <Terminal size={14} />
+          <span>Inspect Workspace</span>
+        </div>
+        <p class="text-xs text-white/80 leading-relaxed font-['IBM_Plex_Mono',monospace] bg-black/40 p-2.5 rounded-xl border border-white/5">
+          "List all my diagrams in my <strong>Architecture</strong> folder and summarize the design."
+        </p>
+        <span class="text-[10px] text-white/40 block">Lists diagrams and reads titles, code, and folder organization.</span>
+      </div>
     </div>
   </div>
 </div>

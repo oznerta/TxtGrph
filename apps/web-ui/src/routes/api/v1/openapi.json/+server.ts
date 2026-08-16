@@ -106,7 +106,8 @@ export const GET: RequestHandler = async ({ url }) => {
                   properties: {
                     title: { type: 'string' },
                     code: { type: 'string', description: 'Mermaid code' },
-                    folder_id: { type: 'string' }
+                    folder_id: { type: 'string', description: 'Folder UUID' },
+                    folder_name: { type: 'string', description: 'Folder name (auto-creates if missing)' }
                   }
                 }
               }
@@ -145,7 +146,8 @@ export const GET: RequestHandler = async ({ url }) => {
                   properties: {
                     title: { type: 'string' },
                     code: { type: 'string' },
-                    folder_id: { type: 'string' }
+                    folder_id: { type: 'string' },
+                    folder_name: { type: 'string', description: 'Folder name to move into' }
                   }
                 }
               }

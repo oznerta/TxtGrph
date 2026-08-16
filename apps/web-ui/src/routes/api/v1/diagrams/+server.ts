@@ -58,8 +58,38 @@ export const POST: RequestHandler = async (event) => {
     const body = await event.request.json();
     const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : 'Untitled Diagram';
     const rawCode = typeof body.code === 'string' && body.code.trim() ? body.code.trim() : 'flowchart TD\n    A[Start] --> B[End]';
-    const folderId = typeof body.folder_id === 'string' && body.folder_id.trim() ? body.folder_id.trim() : null;
+    let folderId = typeof body.folder_id === 'string' && body.folder_id.trim() ? body.folder_id.trim() : null;
+    const folderName = typeof body.folder_name === 'string' && body.folder_name.trim() ? body.folder_name.trim() : null;
     const config = typeof body.config === 'object' && body.config !== null ? body.config : {};
+
+    // Auto-resolve or create folder by name if folder_id is not specified
+    if (!folderId && folderName) {
+      const { data: existingFolder } = await supabase
+        .from('folders')
+        .select('id')
+        .eq('user_id', authUser.userId)
+        .eq('name', folderName)
+        .eq('is_deleted', false)
+        .maybeSingle();
+
+      if (existingFolder?.id) {
+        folderId = existingFolder.id;
+      } else {
+        const { data: newFolder } = await supabase
+          .from('folders')
+          .insert({
+            user_id: authUser.userId,
+            name: folderName,
+            is_deleted: false,
+          })
+          .select('id')
+          .single();
+
+        if (newFolder?.id) {
+          folderId = newFolder.id;
+        }
+      }
+    }
 
     // Sanitize Mermaid code string
     const sanitizedCode = sanitizeMermaidOutput(rawCode);

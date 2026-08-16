@@ -58,6 +58,67 @@ describe('MCP Server Tool Definitions & Execution', () => {
     expect(parsed[0].title).toBe('Test Diagram');
   });
 
+  it('handles create_diagram with folder_name auto-resolution', async () => {
+    const mockSelect = vi.fn().mockReturnThis();
+    const mockEq1 = vi.fn().mockReturnThis();
+    const mockEq2 = vi.fn().mockReturnThis();
+    const mockEq3 = vi.fn().mockReturnThis();
+    const mockMaybeSingle = vi.fn().mockResolvedValue({
+      data: { id: 'folder-abc-123' },
+      error: null,
+    });
+
+    const mockInsert = vi.fn().mockReturnThis();
+    const mockSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: 'diagram-999',
+        title: 'Payment Sequence',
+        code: 'sequenceDiagram\n  A->>B: Pay',
+        folder_id: 'folder-abc-123',
+      },
+      error: null,
+    });
+
+    const mockSupabase = {
+      from: vi.fn((table: string) => {
+        if (table === 'folders') {
+          return {
+            select: mockSelect,
+            eq: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  maybeSingle: mockMaybeSingle,
+                }),
+              }),
+            }),
+          };
+        }
+        return {
+          insert: mockInsert,
+          select: vi.fn().mockReturnValue({
+            single: mockSingle,
+          }),
+        };
+      }),
+    };
+
+    const result = await handleMcpToolCall(
+      'create_diagram',
+      {
+        title: 'Payment Sequence',
+        code: 'sequenceDiagram\n  A->>B: Pay',
+        folder_name: 'Payment Flow',
+      },
+      mockSupabase,
+      'user-123'
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.id).toBe('diagram-999');
+    expect(parsed.folder_id).toBe('folder-abc-123');
+  });
+
   it('handles error for unknown tool call', async () => {
     const mockSupabase = { from: vi.fn() };
     const result = await handleMcpToolCall('non_existent_tool', {}, mockSupabase, 'user-123');
