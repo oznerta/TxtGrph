@@ -18,14 +18,52 @@ export function hashToken(token: string): string {
 
 /**
  * Generates a high-entropy MCP access token.
- * Format: txtgrph_mcp_<64_hex_characters>
+ * When userId is provided, generates a tamper-proof HMAC-signed token.
  */
-export function generateMcpToken(): { rawToken: string; tokenHash: string; tokenPrefix: string } {
-  const randomHex = randomBytes(32).toString('hex');
-  const rawToken = `txtgrph_mcp_${randomHex}`;
+export function generateMcpToken(userId?: string): { rawToken: string; tokenHash: string; tokenPrefix: string } {
+  const randomHex = randomBytes(16).toString('hex');
+  let rawToken: string;
+
+  if (userId) {
+    const payload = JSON.stringify({
+      user: userId,
+      rnd: randomHex,
+      iat: Date.now()
+    });
+    const b64 = Buffer.from(payload).toString('base64url');
+    const sig = createHmac('sha256', AUTH_CODE_SECRET).update(b64).digest('base64url');
+    rawToken = `txtgrph_mcp_${b64}.${sig}`;
+  } else {
+    rawToken = `txtgrph_mcp_${randomBytes(32).toString('hex')}`;
+  }
+
   const tokenHash = hashToken(rawToken);
-  const tokenPrefix = rawToken.slice(0, 20); // 'txtgrph_mcp_' + 8 hex chars
+  const tokenPrefix = `txtgrph_mcp_${randomHex.slice(0, 8)}`;
   return { rawToken, tokenHash, tokenPrefix };
+}
+
+/**
+ * Validates a signed MCP token and extracts the userId if valid.
+ */
+export function verifyMcpToken(token: string): { userId: string } | null {
+  if (!token || !token.startsWith('txtgrph_mcp_')) return null;
+  const rest = token.substring(12);
+  const dotIndex = rest.indexOf('.');
+  if (dotIndex === -1) return null;
+  const b64 = rest.substring(0, dotIndex);
+  const sig = rest.substring(dotIndex + 1);
+  if (!b64 || !sig) return null;
+  const expectedSig = createHmac('sha256', AUTH_CODE_SECRET).update(b64).digest('base64url');
+  if (sig !== expectedSig) return null;
+  try {
+    const data = JSON.parse(Buffer.from(b64, 'base64url').toString('utf-8'));
+    if (data.user) {
+      return { userId: data.user };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**
@@ -123,6 +161,23 @@ export async function authenticateMcpRequest(
   }
 
   if (rawToken) {
+    // Check if token is a signed stateless MCP token
+    const signedData = verifyMcpToken(rawToken);
+    if (signedData?.userId) {
+      // Touch activity in DB best-effort without blocking
+      try {
+        const tokenHash = hashToken(rawToken);
+        await supabase.rpc('verify_and_touch_mcp_token', { p_token_hash: tokenHash });
+      } catch {
+        // best-effort
+      }
+
+      return {
+        userId: signedData.userId,
+        scopes: ['read', 'write', 'mcp']
+      };
+    }
+
     const tokenHash = hashToken(rawToken);
 
     // Call Postgres verification RPC function

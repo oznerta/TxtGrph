@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createSupabaseServerClient } from '$lib/supabase/server';
-import { hashToken, verifyAuthCode, createIdToken } from '$lib/server/mcpAuth';
+import { hashToken, verifyAuthCode, createIdToken, verifyMcpToken } from '$lib/server/mcpAuth';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -105,6 +105,13 @@ export const POST: RequestHandler = async (event) => {
 
     if (!accessToken) {
       accessToken = clientSecret?.trim() || bodyCode?.trim() || '';
+    }
+
+    if (accessToken) {
+      const signedMcp = verifyMcpToken(accessToken);
+      if (signedMcp?.userId) {
+        userId = signedMcp.userId;
+      }
     }
 
     if (!accessToken) {

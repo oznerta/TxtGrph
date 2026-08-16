@@ -236,7 +236,7 @@ export const POST: RequestHandler = async (event) => {
 
       let rawToken = '';
       if (user) {
-        const tokenData = generateMcpToken();
+        const tokenData = generateMcpToken(user.id);
         rawToken = tokenData.rawToken;
         const appLabel = clientId ? `Gemini Connected App (${clientId.slice(0, 16)})` : 'Gemini Connected App';
 
