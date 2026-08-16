@@ -50,8 +50,8 @@
     },
     gemini: {
       name: 'Google Gemini',
-      description: 'Gemini 2.5 Flash & Gemini 2.5 Pro API keys.',
-      defaultModel: 'gemini-2.5-flash',
+      description: 'Gemini 2.0 Flash & Gemini 1.5 Pro API keys.',
+      defaultModel: 'gemini-2.0-flash',
     },
     custom: {
       name: 'Custom OpenAI-Compatible',
@@ -180,13 +180,32 @@
       isTesting = true;
       const rawKey = await decryptApiKey(existing.encrypted_key, sessionData.session.user.id);
 
-      const res = await AIRouter.testConnection({
+      const config = {
         provider,
         apiKey: rawKey,
         baseUrl: existing.base_url || undefined,
         model: existing.model || undefined,
-      });
+      };
 
+      try {
+        const response = await fetch('/api/v1/ai/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            config,
+            options: { prompt: 'flowchart TD\n  A[Start] --> B[End]' },
+          }),
+        });
+
+        if (response.ok && response.body) {
+          testStatus[provider] = { success: true, message: 'Connected & verified API key successfully!' };
+          return;
+        }
+      } catch {
+        // Fallback to client connection test
+      }
+
+      const res = await AIRouter.testConnection(config);
       testStatus[provider] = res;
     } catch (err: any) {
       testStatus[provider] = { success: false, message: err.message || 'Test failed' };

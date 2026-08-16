@@ -32,11 +32,9 @@
     Sparkles,
     Building2,
     User,
-    Users,
-    Zap
+    Users
   } from 'lucide-svelte';
   import { workspaceStore } from '$lib/stores/workspaceStore.svelte';
-  import ConnectAiModal from './ConnectAiModal.svelte';
 
   const scopeOptions: SelectOption[] = [
     { value: 'all', label: 'All files' },
@@ -105,7 +103,6 @@
   let viewMode = $state<'grid' | 'list'>('grid');
   let filterScope = $state<'all' | 'recents' | 'favorites' | 'shared'>('all');
   let sortOption = $state<'modified' | 'name'>('modified');
-  let isConnectAiModalOpen = $state(false);
 
   // Multi-Selection State (Folders + Diagrams)
   let selectedDiagramIds = $state<Set<string>>(new Set());
@@ -335,19 +332,6 @@
 
     <!-- Right: Primary Action Buttons -->
     <div class="flex items-center gap-2.5 shrink-0">
-      {#if activeFolderId}
-        {@const currentActiveFolder = folders.find((f) => f.id === activeFolderId)}
-        {#if currentActiveFolder}
-          <button
-            onclick={() => onShareFolder(currentActiveFolder)}
-            class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
-          >
-            <Share2 class="w-4 h-4 text-amber-400" />
-            <span>Share folder</span>
-          </button>
-        {/if}
-      {/if}
-
       <div class="inline-flex rounded-xl shadow-lg border border-white/20 overflow-hidden bg-white text-black">
         <button
           onclick={() => onCreateDiagram(activeFolderId)}
@@ -366,14 +350,18 @@
         </button>
       </div>
 
-      <button
-        onclick={() => (isConnectAiModalOpen = true)}
-        title="Connect ChatGPT, Claude, Gemini, or Cursor"
-        class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
-      >
-        <Zap class="w-4 h-4 text-amber-400" />
-        <span class="hidden sm:inline">Connect AI Chat</span>
-      </button>
+      {#if activeFolderId}
+        {@const currentActiveFolder = folders.find((f) => f.id === activeFolderId)}
+        {#if currentActiveFolder}
+          <button
+            onclick={() => onShareFolder(currentActiveFolder)}
+            class="px-3.5 py-2 text-xs font-semibold rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 shadow-sm transition-colors flex items-center gap-2 cursor-pointer"
+          >
+            <Share2 class="w-4 h-4 text-amber-400" />
+            <span>Share folder</span>
+          </button>
+        {/if}
+      {/if}
 
       <button
         onclick={() => onCreateFolder(activeFolderId)}
@@ -866,5 +854,4 @@
     onMove={handleConfirmMove}
   />
 
-  <ConnectAiModal bind:isOpen={isConnectAiModalOpen} />
 </div>

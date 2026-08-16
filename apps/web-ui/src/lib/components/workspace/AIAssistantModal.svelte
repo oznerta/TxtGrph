@@ -124,17 +124,68 @@
 
       const rawApiKey = await decryptApiKey(activeKeyRecord.encrypted_key, sessionData.session.user.id);
 
+      const config = {
+        provider: selectedProvider as any,
+        apiKey: rawApiKey,
+        baseUrl: activeKeyRecord.base_url || undefined,
+        model: activeKeyRecord.model || undefined,
+      };
+
+      const options = {
+        prompt: promptText.trim(),
+        currentCode: mode === 'refine' ? currentCode : undefined,
+      };
+
+      // Try server-side SSE stream to avoid CORS & ad-blocker limitations
+      try {
+        const response = await fetch('/api/v1/ai/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config, options }),
+        });
+
+        if (response.ok && response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith('data:')) continue;
+              const dataStr = trimmed.substring(5).trim();
+
+              try {
+                const chunk = JSON.parse(dataStr);
+                if (chunk.type === 'token' && chunk.fullText) {
+                  streamedText = chunk.fullText;
+                } else if (chunk.type === 'complete' && chunk.sanitizedCode) {
+                  sanitizedCode = chunk.sanitizedCode;
+                } else if (chunk.type === 'error' && chunk.error) {
+                  errorMessage = chunk.error;
+                }
+              } catch {
+                // ignore partial JSON parse error
+              }
+            }
+          }
+          return;
+        }
+      } catch (proxyErr) {
+        console.warn('Server proxy unavailable, attempting direct browser call:', proxyErr);
+      }
+
+      // Client direct call fallback
       await AIRouter.streamGenerate(
-        {
-          provider: selectedProvider as any,
-          apiKey: rawApiKey,
-          baseUrl: activeKeyRecord.base_url || undefined,
-          model: activeKeyRecord.model || undefined,
-        },
-        {
-          prompt: promptText.trim(),
-          currentCode: mode === 'refine' ? currentCode : undefined,
-        },
+        config,
+        options,
         (chunk) => {
           if (chunk.type === 'token' && chunk.fullText) {
             streamedText = chunk.fullText;

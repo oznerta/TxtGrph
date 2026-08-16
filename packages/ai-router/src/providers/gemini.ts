@@ -8,7 +8,7 @@ export async function streamGemini(
   onChunk: StreamHandler,
   signal?: AbortSignal
 ): Promise<string> {
-  const model = config.model || 'gemini-2.5-flash';
+  const model = config.model || 'gemini-2.0-flash';
   const baseUrl = (config.baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
 
   const systemPrompt = options.currentCode ? SYSTEM_PROMPT_REFINE : SYSTEM_PROMPT_CREATE;
@@ -38,8 +38,14 @@ export async function streamGemini(
   });
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => response.statusText);
-    const errorMsg = `Gemini API Error (${response.status}): ${errorText}`;
+    let detail = '';
+    try {
+      const json = await response.json();
+      detail = json.error?.message || JSON.stringify(json.error || json);
+    } catch {
+      detail = await response.text().catch(() => response.statusText);
+    }
+    const errorMsg = `Gemini API Error (${response.status}): ${detail}`;
     onChunk({ type: 'error', error: errorMsg });
     throw new Error(errorMsg);
   }

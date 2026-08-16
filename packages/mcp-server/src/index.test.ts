@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { TOOL_DEFINITIONS, handleMcpToolCall } from './tools.js';
 
 describe('MCP Server Tool Definitions & Execution', () => {
-  it('defines 7 core MCP tools with valid schemas', () => {
-    expect(TOOL_DEFINITIONS).toHaveLength(7);
+  it('defines 8 core MCP tools with valid schemas', () => {
+    expect(TOOL_DEFINITIONS).toHaveLength(8);
     const toolNames = TOOL_DEFINITIONS.map((t) => t.name);
     expect(toolNames).toContain('list_diagrams');
     expect(toolNames).toContain('get_diagram');
@@ -11,6 +11,7 @@ describe('MCP Server Tool Definitions & Execution', () => {
     expect(toolNames).toContain('update_diagram');
     expect(toolNames).toContain('delete_diagram');
     expect(toolNames).toContain('list_folders');
+    expect(toolNames).toContain('create_folder');
     expect(toolNames).toContain('render_mermaid_svg');
   });
 

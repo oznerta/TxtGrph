@@ -34,8 +34,14 @@ export async function streamOpenAI(
   });
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => response.statusText);
-    const errorMsg = `OpenAI API Error (${response.status}): ${errorText}`;
+    let detail = '';
+    try {
+      const json = await response.json();
+      detail = json.error?.message || JSON.stringify(json.error || json);
+    } catch {
+      detail = await response.text().catch(() => response.statusText);
+    }
+    const errorMsg = `OpenAI API Error (${response.status}): ${detail}`;
     onChunk({ type: 'error', error: errorMsg });
     throw new Error(errorMsg);
   }
