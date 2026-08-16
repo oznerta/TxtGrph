@@ -26,21 +26,72 @@ export const GET: RequestHandler = async (event) => {
   }
 
   const db = createSupabaseAdminClient();
-  const { data, error } = await db
+  const { data: directFolders, error } = await db
     .from('folders')
-    .select('id, name, parent_id, created_at, updated_at')
+    .select('id, name, parent_id, is_shared, organization_id, created_at, updated_at')
     .eq('user_id', authUser.userId)
     .eq('is_deleted', false)
     .order('name', { ascending: true });
 
-  if (error) {
+  let allFolders: any[] = directFolders || [];
+
+  try {
+    const { data: sharedCollabs } = await db
+      .from('folder_collaborators')
+      .select('folder_id')
+      .eq('user_id', authUser.userId);
+
+    if (sharedCollabs && sharedCollabs.length > 0) {
+      const sharedIds = sharedCollabs
+        .map((sc: any) => sc.folder_id)
+        .filter((id: string) => !allFolders.some((f) => f.id === id));
+
+      if (sharedIds.length > 0) {
+        const { data: sharedFolders } = await db
+          .from('folders')
+          .select('id, name, parent_id, is_shared, organization_id, created_at, updated_at')
+          .in('id', sharedIds)
+          .eq('is_deleted', false);
+
+        if (sharedFolders) {
+          allFolders = [...allFolders, ...sharedFolders];
+        }
+      }
+    }
+
+    const { data: orgMemberships } = await db
+      .from('organization_members')
+      .select('organization_id')
+      .eq('user_id', authUser.userId);
+
+    if (orgMemberships && orgMemberships.length > 0) {
+      const orgIds = orgMemberships.map((om: any) => om.organization_id);
+      const { data: orgFolders } = await db
+        .from('folders')
+        .select('id, name, parent_id, is_shared, organization_id, created_at, updated_at')
+        .in('organization_id', orgIds)
+        .eq('is_deleted', false);
+
+      if (orgFolders) {
+        orgFolders.forEach((of: any) => {
+          if (!allFolders.some((f) => f.id === of.id)) {
+            allFolders.push(of);
+          }
+        });
+      }
+    }
+  } catch {
+    // best-effort
+  }
+
+  if (error && allFolders.length === 0) {
     return json(
       { success: false, error: { code: 'INTERNAL_ERROR', message: error.message } },
       { status: 500, headers: corsHeaders }
     );
   }
 
-  return json({ success: true, data }, { headers: corsHeaders });
+  return json({ success: true, data: allFolders }, { headers: corsHeaders });
 };
 
 export const POST: RequestHandler = async (event) => {

@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createSupabaseServerClient } from '$lib/supabase/server';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '$lib/supabase/server';
 import { generateMcpToken } from '$lib/server/mcpAuth';
 
 export const GET: RequestHandler = async (event) => {
@@ -16,7 +16,8 @@ export const GET: RequestHandler = async (event) => {
     );
   }
 
-  const { data, error } = await supabase
+  const db = createSupabaseAdminClient();
+  const { data, error } = await db
     .from('mcp_tokens')
     .select('id, name, token_prefix, scopes, last_used_at, expires_at, created_at')
     .eq('user_id', user.id)
@@ -49,16 +50,17 @@ export const POST: RequestHandler = async (event) => {
     const body = await event.request.json();
     const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'API Access Token';
 
-    const { rawToken, tokenHash, tokenPrefix } = generateMcpToken();
+    const { rawToken, tokenHash, tokenPrefix } = generateMcpToken(user.id);
+    const db = createSupabaseAdminClient();
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('mcp_tokens')
       .insert({
         user_id: user.id,
         name,
         token_hash: tokenHash,
         token_prefix: tokenPrefix,
-        scopes: ['read', 'write'],
+        scopes: ['read', 'write', 'mcp'],
       })
       .select('id, name, token_prefix, created_at')
       .single();

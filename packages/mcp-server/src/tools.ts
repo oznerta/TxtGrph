@@ -280,17 +280,70 @@ export async function handleMcpToolCall(
       }
 
       case 'list_folders': {
-        const { data, error } = await supabase
+        const { data: directFolders, error } = await supabase
           .from('folders')
-          .select('id, name, parent_id, created_at, updated_at')
+          .select('id, name, parent_id, created_at, updated_at, is_shared, organization_id')
           .eq('user_id', userId)
           .eq('is_deleted', false)
           .order('name', { ascending: true });
 
-        if (error) throw new Error(error.message);
+        let allFolders: any[] = directFolders || [];
+
+        try {
+          // Fetch folders shared with user
+          const { data: sharedCollabs } = await supabase
+            .from('folder_collaborators')
+            .select('folder_id')
+            .eq('user_id', userId);
+
+          if (sharedCollabs && sharedCollabs.length > 0) {
+            const sharedIds = sharedCollabs
+              .map((sc: any) => sc.folder_id)
+              .filter((id: string) => !allFolders.some((f) => f.id === id));
+
+            if (sharedIds.length > 0) {
+              const { data: sharedFolders } = await supabase
+                .from('folders')
+                .select('id, name, parent_id, created_at, updated_at, is_shared, organization_id')
+                .in('id', sharedIds)
+                .eq('is_deleted', false);
+
+              if (sharedFolders) {
+                allFolders = [...allFolders, ...sharedFolders];
+              }
+            }
+          }
+
+          // Fetch organization folders
+          const { data: orgMemberships } = await supabase
+            .from('organization_members')
+            .select('organization_id')
+            .eq('user_id', userId);
+
+          if (orgMemberships && orgMemberships.length > 0) {
+            const orgIds = orgMemberships.map((om: any) => om.organization_id);
+            const { data: orgFolders } = await supabase
+              .from('folders')
+              .select('id, name, parent_id, created_at, updated_at, is_shared, organization_id')
+              .in('organization_id', orgIds)
+              .eq('is_deleted', false);
+
+            if (orgFolders) {
+              orgFolders.forEach((of: any) => {
+                if (!allFolders.some((f) => f.id === of.id)) {
+                  allFolders.push(of);
+                }
+              });
+            }
+          }
+        } catch {
+          // best-effort
+        }
+
+        if (error && allFolders.length === 0) throw new Error(error.message);
 
         return {
-          content: [{ type: 'text', text: JSON.stringify(data || [], null, 2) }],
+          content: [{ type: 'text', text: JSON.stringify(allFolders, null, 2) }],
         };
       }
 
