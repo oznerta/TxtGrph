@@ -1,8 +1,19 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createSupabaseServerClient } from '$lib/supabase/server';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '$lib/supabase/server';
 import { authenticateMcpRequest } from '$lib/server/mcpAuth';
 import { sanitizeMermaidOutput } from '@txtgrph/core';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, Client-Id, Client-Secret, X-Txtgrph-Api-Key',
+  'Access-Control-Max-Age': '86400'
+};
+
+export const OPTIONS: RequestHandler = async () => {
+  return new Response(null, { status: 200, headers: corsHeaders });
+};
 
 export const GET: RequestHandler = async (event) => {
   const supabase = createSupabaseServerClient(event);
@@ -11,13 +22,14 @@ export const GET: RequestHandler = async (event) => {
   if (!authUser) {
     return json(
       { success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or missing Bearer token' } },
-      { status: 401 }
+      { status: 401, headers: corsHeaders }
     );
   }
 
   const { id } = event.params;
+  const db = createSupabaseAdminClient();
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('diagrams')
     .select('id, title, code, config, folder_id, is_shared, share_token, created_at, updated_at')
     .eq('id', id)
@@ -28,11 +40,11 @@ export const GET: RequestHandler = async (event) => {
   if (error || !data) {
     return json(
       { success: false, error: { code: 'NOT_FOUND', message: 'Diagram not found' } },
-      { status: 404 }
+      { status: 404, headers: corsHeaders }
     );
   }
 
-  return json({ success: true, data });
+  return json({ success: true, data }, { headers: corsHeaders });
 };
 
 export const PUT: RequestHandler = async (event) => {
@@ -42,7 +54,7 @@ export const PUT: RequestHandler = async (event) => {
   if (!authUser) {
     return json(
       { success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or missing Bearer token' } },
-      { status: 401 }
+      { status: 401, headers: corsHeaders }
     );
   }
 
@@ -68,11 +80,12 @@ export const PUT: RequestHandler = async (event) => {
     if (Object.keys(updatePayload).length === 0) {
       return json(
         { success: false, error: { code: 'BAD_REQUEST', message: 'No valid fields provided for update' } },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
 
-    const { data, error } = await supabase
+    const db = createSupabaseAdminClient();
+    const { data, error } = await db
       .from('diagrams')
       .update(updatePayload)
       .eq('id', id)
@@ -84,15 +97,15 @@ export const PUT: RequestHandler = async (event) => {
     if (error || !data) {
       return json(
         { success: false, error: { code: 'NOT_FOUND', message: 'Diagram not found or update failed' } },
-        { status: 404 }
+        { status: 404, headers: corsHeaders }
       );
     }
 
-    return json({ success: true, data });
+    return json({ success: true, data }, { headers: corsHeaders });
   } catch (err: any) {
     return json(
       { success: false, error: { code: 'INVALID_JSON', message: err?.message || 'Malformed JSON body' } },
-      { status: 400 }
+      { status: 400, headers: corsHeaders }
     );
   }
 };
@@ -104,13 +117,14 @@ export const DELETE: RequestHandler = async (event) => {
   if (!authUser) {
     return json(
       { success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or missing Bearer token' } },
-      { status: 401 }
+      { status: 401, headers: corsHeaders }
     );
   }
 
   const { id } = event.params;
+  const db = createSupabaseAdminClient();
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('diagrams')
     .update({ is_deleted: true, deleted_at: new Date().toISOString() })
     .eq('id', id)
@@ -122,9 +136,9 @@ export const DELETE: RequestHandler = async (event) => {
   if (error || !data) {
     return json(
       { success: false, error: { code: 'NOT_FOUND', message: 'Diagram not found or already deleted' } },
-      { status: 404 }
+      { status: 404, headers: corsHeaders }
     );
   }
 
-  return json({ success: true, data: { id, deleted: true } });
+  return json({ success: true, data: { id, deleted: true } }, { headers: corsHeaders });
 };

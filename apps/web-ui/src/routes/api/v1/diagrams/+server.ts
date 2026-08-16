@@ -1,8 +1,19 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createSupabaseServerClient } from '$lib/supabase/server';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '$lib/supabase/server';
 import { authenticateMcpRequest } from '$lib/server/mcpAuth';
 import { sanitizeMermaidOutput } from '@txtgrph/core';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Authorization, Content-Type, Client-Id, Client-Secret, X-Txtgrph-Api-Key',
+  'Access-Control-Max-Age': '86400'
+};
+
+export const OPTIONS: RequestHandler = async () => {
+  return new Response(null, { status: 200, headers: corsHeaders });
+};
 
 export const GET: RequestHandler = async (event) => {
   const supabase = createSupabaseServerClient(event);
@@ -11,7 +22,7 @@ export const GET: RequestHandler = async (event) => {
   if (!authUser) {
     return json(
       { success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or missing Bearer token' } },
-      { status: 401 }
+      { status: 401, headers: corsHeaders }
     );
   }
 
@@ -19,7 +30,8 @@ export const GET: RequestHandler = async (event) => {
   const limitParam = event.url.searchParams.get('limit');
   const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 50, 100) : 50;
 
-  let query = supabase
+  const db = createSupabaseAdminClient();
+  let query = db
     .from('diagrams')
     .select('id, title, folder_id, config, created_at, updated_at')
     .eq('user_id', authUser.userId)
@@ -36,11 +48,11 @@ export const GET: RequestHandler = async (event) => {
   if (error) {
     return json(
       { success: false, error: { code: 'INTERNAL_ERROR', message: error.message } },
-      { status: 500 }
+      { status: 500, headers: corsHeaders }
     );
   }
 
-  return json({ success: true, data });
+  return json({ success: true, data }, { headers: corsHeaders });
 };
 
 export const POST: RequestHandler = async (event) => {
@@ -50,7 +62,7 @@ export const POST: RequestHandler = async (event) => {
   if (!authUser) {
     return json(
       { success: false, error: { code: 'UNAUTHORIZED', message: 'Invalid or missing Bearer token' } },
-      { status: 401 }
+      { status: 401, headers: corsHeaders }
     );
   }
 
@@ -62,9 +74,11 @@ export const POST: RequestHandler = async (event) => {
     const folderName = typeof body.folder_name === 'string' && body.folder_name.trim() ? body.folder_name.trim() : null;
     const config = typeof body.config === 'object' && body.config !== null ? body.config : {};
 
+    const db = createSupabaseAdminClient();
+
     // Auto-resolve or create folder by name if folder_id is not specified
     if (!folderId && folderName) {
-      const { data: existingFolder } = await supabase
+      const { data: existingFolder } = await db
         .from('folders')
         .select('id')
         .eq('user_id', authUser.userId)
@@ -75,7 +89,7 @@ export const POST: RequestHandler = async (event) => {
       if (existingFolder?.id) {
         folderId = existingFolder.id;
       } else {
-        const { data: newFolder } = await supabase
+        const { data: newFolder } = await db
           .from('folders')
           .insert({
             user_id: authUser.userId,
@@ -94,7 +108,7 @@ export const POST: RequestHandler = async (event) => {
     // Sanitize Mermaid code string
     const sanitizedCode = sanitizeMermaidOutput(rawCode);
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('diagrams')
       .insert({
         user_id: authUser.userId,
@@ -110,15 +124,15 @@ export const POST: RequestHandler = async (event) => {
     if (error) {
       return json(
         { success: false, error: { code: 'BAD_REQUEST', message: error.message } },
-        { status: 400 }
+        { status: 400, headers: corsHeaders }
       );
     }
 
-    return json({ success: true, data }, { status: 201 });
+    return json({ success: true, data }, { status: 201, headers: corsHeaders });
   } catch (err: any) {
     return json(
       { success: false, error: { code: 'INVALID_JSON', message: err?.message || 'Malformed JSON payload' } },
-      { status: 400 }
+      { status: 400, headers: corsHeaders }
     );
   }
 };

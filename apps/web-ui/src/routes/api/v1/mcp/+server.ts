@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createSupabaseServerClient } from '$lib/supabase/server';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '$lib/supabase/server';
 import { authenticateMcpRequest } from '$lib/server/mcpAuth';
 import { TOOL_DEFINITIONS, handleMcpToolCall } from '@txtgrph/mcp-server';
 
@@ -148,7 +148,8 @@ export const POST: RequestHandler = async (event) => {
           );
         }
 
-        const result = await handleMcpToolCall(toolName, toolArgs, supabase, authUser.userId);
+        const adminSupabase = createSupabaseAdminClient();
+        const result = await handleMcpToolCall(toolName, toolArgs, adminSupabase, authUser.userId);
         if (result.isError) {
           return json(
             {
@@ -189,7 +190,8 @@ export const POST: RequestHandler = async (event) => {
       );
     }
 
-    const result = await handleMcpToolCall(name, toolArgs || {}, supabase, authUser.userId);
+    const adminSupabase = createSupabaseAdminClient();
+    const result = await handleMcpToolCall(name, toolArgs || {}, adminSupabase, authUser.userId);
 
     return json(
       {
