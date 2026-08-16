@@ -23,6 +23,21 @@ export const GET: RequestHandler = async ({ url }) => {
     ],
     components: {
       securitySchemes: {
+        OAuth2: {
+          type: 'oauth2',
+          description: 'TxtGrph 1-Click OAuth 2.0 Authentication for ChatGPT & AI Platforms',
+          flows: {
+            authorizationCode: {
+              authorizationUrl: `${origin}/api/v1/oauth/authorize`,
+              tokenUrl: `${origin}/api/v1/oauth/token`,
+              scopes: {
+                mcp: 'Full MCP execution rights',
+                read: 'Read diagrams and folders',
+                write: 'Create and edit diagrams and folders'
+              }
+            }
+          }
+        },
         BearerAuth: {
           type: 'http',
           scheme: 'bearer',
@@ -32,6 +47,9 @@ export const GET: RequestHandler = async ({ url }) => {
       }
     },
     security: [
+      {
+        OAuth2: ['mcp', 'read', 'write']
+      },
       {
         BearerAuth: []
       }
