@@ -1,12 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Sparkles, Loader2, Play, Check, X, Settings, Cpu, Wrench, RefreshCw, Lightbulb, HelpCircle, ArrowRight, Zap } from 'lucide-svelte';
+  import { Sparkles, Loader2, Play, Check, X, Settings, Cpu, Wrench, RefreshCw, Lightbulb } from 'lucide-svelte';
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { decryptApiKey } from '$lib/crypto';
-  import { AIRouter, type AIProvider } from '@txtgrph/ai-router';
+  import { AIRouter } from '@txtgrph/ai-router';
   import type { UserKeyRecord } from '../../../routes/settings/+page.js';
   import CustomSelect, { type SelectOption } from '$lib/components/ui/CustomSelect.svelte';
-  import ConnectAiModal from './ConnectAiModal.svelte';
 
   interface Props {
     isOpen?: boolean;
@@ -34,7 +33,6 @@
   let streamedText = $state('');
   let sanitizedCode = $state('');
   let errorMessage = $state('');
-  let isConnectAiOpen = $state(false);
 
   let providerOptions = $derived.by<SelectOption[]>(() => {
     return userKeys.map((k) => ({
@@ -45,16 +43,16 @@
   });
 
   const createPromptTemplates = [
-    { label: '🚀 User Auth Flow', text: 'Create a sequence diagram showing user login, password verification, JWT generation, and dashboard redirect' },
-    { label: '🏗️ System Architecture', text: 'Create an architecture diagram with Client App, API Gateway, Microservices, Redis Cache, and PostgreSQL Database' },
-    { label: '🛒 E-Commerce Checkout', text: 'Create a flowchart for e-commerce checkout from cart item check to Stripe payment and email receipt' },
-    { label: '🔄 Data Pipeline', text: 'Create a flowchart of a data ingestion pipeline from Kafka stream to ETL processing, S3 bucket, and Snowflake' }
+    { label: 'Auth Flow', text: 'Sequence diagram showing user login, password verification, JWT issuance, and dashboard redirect' },
+    { label: 'System Architecture', text: 'Architecture diagram with Client App, API Gateway, Microservices, Redis Cache, and PostgreSQL' },
+    { label: 'Checkout Flow', text: 'Flowchart for e-commerce checkout from cart validation to Stripe payment and order confirmation' },
+    { label: 'Data Pipeline', text: 'Flowchart of a data pipeline from Kafka stream to ETL processing, S3 bucket, and Snowflake warehouse' }
   ];
 
   const refinePromptTemplates = [
-    { label: '🎨 Vibrant Styling', text: 'Apply modern vibrant colors, curved edges, and custom stroke styling to all nodes' },
-    { label: '🛡️ Error Handling', text: 'Add error handling branches, retry loops, and fallback alert nodes' },
-    { label: '📝 Detailed Labels', text: 'Add descriptive labels and notes explaining each processing step in detail' }
+    { label: 'Vibrant Colors', text: 'Apply modern vibrant colors, curved edges, and custom stroke styling to all nodes' },
+    { label: 'Error Handling', text: 'Add error handling branches, retry loops, and fallback alert nodes' },
+    { label: 'Descriptive Labels', text: 'Add descriptive labels and notes explaining each processing step in detail' }
   ];
 
   function resetState() {
@@ -136,7 +134,7 @@
         currentCode: mode === 'refine' ? currentCode : undefined,
       };
 
-      // Try server-side SSE stream to avoid CORS & ad-blocker limitations
+      // Server-side SSE stream
       try {
         const response = await fetch('/api/v1/ai/generate', {
           method: 'POST',
@@ -172,14 +170,14 @@
                   errorMessage = chunk.error;
                 }
               } catch {
-                // ignore partial JSON parse error
+                // ignore partial parse error
               }
             }
           }
           return;
         }
       } catch (proxyErr) {
-        console.warn('Server proxy unavailable, attempting direct browser call:', proxyErr);
+        console.warn('Server proxy error, trying client fallback:', proxyErr);
       }
 
       // Client direct call fallback
@@ -231,57 +229,67 @@
   <!-- Backdrop -->
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_interactive_supports_focus -->
   <div
-    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 font-['Instrument_Sans',sans-serif] select-none"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 font-['Instrument_Sans',sans-serif] select-none"
     role="presentation"
     onclick={handleClose}
   >
-    <!-- Modal Card Container -->
+    <!-- Modal Container -->
     <div
-      class="bg-[#0F1117] border border-white/15 rounded-2xl max-w-2xl w-full p-6 shadow-2xl flex flex-col max-h-[90vh] text-white overflow-visible relative"
+      class="bg-[#0D0F15] border border-white/12 rounded-2xl max-w-lg w-full p-5 shadow-2xl flex flex-col text-white relative animate-in fade-in zoom-in-95 duration-150"
       role="dialog"
       aria-labelledby="ai-assistant-title"
       onclick={(e) => e.stopPropagation()}
     >
-      <!-- Header -->
-      <div class="flex items-start justify-between border-b border-white/10 pb-4 shrink-0">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/20 to-amber-600/10 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 shadow-sm">
-            <Sparkles class="w-5 h-5" />
+      <!-- Sleek Minimal Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-lg bg-amber-400/10 border border-amber-400/20 text-amber-400 flex items-center justify-center">
+            <Sparkles size={14} />
           </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <h2 id="ai-assistant-title" class="text-base font-bold text-white tracking-tight">AI Diagram Assistant</h2>
-              <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/30 font-['IBM_Plex_Mono',monospace]">
-                BYOK Mode
-              </span>
-            </div>
-            <p class="text-xs text-white/50 mt-0.5">
-              Turn your ideas into visual diagrams using your personal AI API key.
-            </p>
-          </div>
+          <h2 id="ai-assistant-title" class="text-sm font-bold text-white tracking-tight">AI Diagram Assistant</h2>
         </div>
+
+        <!-- Mode Toggle (Create / Refine) -->
+        <div class="flex items-center gap-1 p-0.5 rounded-lg bg-black/50 border border-white/10 text-[11px] font-medium">
+          <button
+            type="button"
+            onclick={() => (mode = 'create')}
+            class="px-2.5 py-1 rounded-md transition-colors cursor-pointer {mode === 'create' ? 'bg-amber-400 text-black font-bold shadow-xs' : 'text-white/60 hover:text-white'}"
+          >
+            Create New
+          </button>
+          <button
+            type="button"
+            onclick={() => (mode = 'refine')}
+            disabled={!currentCode || !currentCode.trim()}
+            class="px-2.5 py-1 rounded-md transition-colors cursor-pointer {mode === 'refine' ? 'bg-amber-400 text-black font-bold shadow-xs' : 'text-white/60 hover:text-white'} disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Refine Current
+          </button>
+        </div>
+
         <button
           onclick={handleClose}
-          class="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          class="p-1 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors cursor-pointer ml-1"
           aria-label="Close assistant"
         >
-          <X class="w-4.5 h-4.5" />
+          <X size={15} />
         </button>
       </div>
 
       {#if isLoadingKeys}
-        <div class="p-10 text-center text-xs text-white/50 flex items-center justify-center gap-2 font-['IBM_Plex_Mono',monospace]">
-          <Loader2 class="w-4 h-4 animate-spin text-amber-400" /> Loading your saved AI keys...
+        <div class="py-8 text-center text-xs text-white/50 flex items-center justify-center gap-2 font-['IBM_Plex_Mono',monospace]">
+          <Loader2 class="w-3.5 h-3.5 animate-spin text-amber-400" /> Loading AI keys...
         </div>
       {:else if userKeys.length === 0}
-        <div class="p-6 text-center space-y-4 rounded-xl bg-white/[0.03] border border-white/10 my-4">
-          <div class="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
-            <Settings class="w-6 h-6" />
+        <div class="py-6 text-center space-y-3 rounded-xl bg-white/[0.02] border border-white/10 my-3">
+          <div class="w-9 h-9 rounded-xl bg-amber-400/10 border border-amber-400/20 text-amber-400 flex items-center justify-center mx-auto">
+            <Settings size={16} />
           </div>
           <div>
-            <h3 class="text-sm font-bold text-white">No AI Keys Configured</h3>
-            <p class="text-xs text-white/60 max-w-md mx-auto mt-1">
-              Add your API key (OpenAI, Anthropic, Gemini, DeepSeek, Groq, Ollama) in Settings. Your keys are encrypted and stored safely in your browser.
+            <h3 class="text-xs font-bold text-white">No AI API Key Found</h3>
+            <p class="text-[11px] text-white/50 max-w-xs mx-auto mt-0.5">
+              Add your OpenAI, Anthropic, or Gemini key in Settings to generate diagrams.
             </p>
           </div>
           <button
@@ -289,186 +297,123 @@
               handleClose();
               onOpenSettings();
             }}
-            class="inline-flex items-center gap-2 px-4 py-2.5 bg-white text-black text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors shadow-md cursor-pointer"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-400 text-black text-xs font-bold rounded-lg hover:bg-amber-300 transition-colors cursor-pointer"
           >
-            <Settings class="w-4 h-4" /> Open Key Settings
+            <Settings size={12} /> Configure API Keys
           </button>
         </div>
       {:else}
-        <!-- Main Form Body -->
-        <div class="space-y-4 py-4 overflow-y-auto custom-scrollbar flex-1 pr-1 overflow-x-visible">
-          <!-- AI Provider & Action Mode Selection -->
-          <div class="space-y-3">
-            <div class="flex items-center justify-between">
-              <label for="ai-provider-select-box" class="block text-xs font-semibold text-white/80">AI Provider Key</label>
+        <!-- Body -->
+        <div class="space-y-3 pt-3 flex-1">
+          <!-- Compact Provider Selector Row -->
+          <div class="flex items-center justify-between text-xs">
+            <div class="flex items-center gap-2 w-full">
+              <span class="text-white/50 text-[11px] shrink-0">Model Key:</span>
+              <div class="flex-1">
+                <CustomSelect
+                  id="ai-provider-select-box"
+                  options={providerOptions}
+                  bind:value={selectedProvider}
+                />
+              </div>
               <button
                 onclick={() => {
                   handleClose();
                   onOpenSettings();
                 }}
-                class="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors font-['IBM_Plex_Mono',monospace] cursor-pointer"
+                class="text-[11px] text-amber-400 hover:text-amber-300 font-['IBM_Plex_Mono',monospace] transition-colors cursor-pointer shrink-0 ml-1"
+                title="Manage API Keys"
               >
-                <Settings class="w-3 h-3" /> Key Vault
-              </button>
-            </div>
-            <CustomSelect
-              id="ai-provider-select-box"
-              options={providerOptions}
-              bind:value={selectedProvider}
-            />
-          </div>
-
-          <!-- Action Mode Radio Cards (Eliminates dropdown clipping & clear for non-technical users) -->
-          <div>
-            <label class="block text-xs font-semibold text-white/80 mb-2">What would you like to do?</label>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onclick={() => (mode = 'create')}
-                class={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
-                  mode === 'create'
-                    ? 'border-amber-400 bg-amber-500/10 text-white ring-1 ring-amber-400/40 shadow-inner'
-                    : 'border-white/15 bg-[#0A0B0E] hover:border-white/30 text-white/70 hover:text-white'
-                }`}
-              >
-                <div class={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${mode === 'create' ? 'bg-amber-400 text-black font-bold' : 'bg-white/10 text-white/50'}`}>
-                  <Sparkles size={14} />
-                </div>
-                <div>
-                  <div class="text-xs font-bold text-white">Create New Diagram</div>
-                  <div class="text-[11px] text-white/50 leading-tight mt-0.5">Generate a brand-new diagram from scratch</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onclick={() => (mode = 'refine')}
-                disabled={!currentCode || !currentCode.trim()}
-                class={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
-                  mode === 'refine'
-                    ? 'border-amber-400 bg-amber-500/10 text-white ring-1 ring-amber-400/40 shadow-inner'
-                    : 'border-white/15 bg-[#0A0B0E] hover:border-white/30 text-white/70 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed'
-                }`}
-              >
-                <div class={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${mode === 'refine' ? 'bg-amber-400 text-black font-bold' : 'bg-white/10 text-white/50'}`}>
-                  <Wrench size={14} />
-                </div>
-                <div>
-                  <div class="text-xs font-bold text-white">Refine Open Diagram</div>
-                  <div class="text-[11px] text-white/50 leading-tight mt-0.5">Modify & update currently open editor code</div>
-                </div>
+                Vault ⚙️
               </button>
             </div>
           </div>
 
-          <!-- Prompt Input & Starter Templates -->
-          <div>
-            <div class="flex items-center justify-between mb-1.5">
-              <label for="ai-prompt-input" class="block text-xs font-semibold text-white/80">
-                Instructions / Diagram Prompt
-              </label>
-              <span class="text-[10px] text-white/40 font-['IBM_Plex_Mono',monospace]">Describe what you want to visualize</span>
-            </div>
-
+          <!-- Prompt Textarea -->
+          <div class="space-y-1.5">
             <textarea
               id="ai-prompt-input"
               bind:value={promptText}
-              placeholder={mode === 'create' ? 'e.g. Create a sequence diagram showing user login, JWT issue, and DB lookup' : 'e.g. Add an error handling node and style it red'}
+              placeholder={mode === 'create' ? 'e.g. Create a sequence diagram showing user login, JWT issue, and DB lookup...' : 'e.g. Add an error handling branch and highlight failed states in red...'}
               rows={3}
-              class="w-full px-3.5 py-2.5 text-xs rounded-xl border border-white/15 bg-[#0A0B0E] text-white placeholder-white/30 focus:outline-none focus:border-amber-400/50 font-['IBM_Plex_Mono',monospace] transition-colors"
+              class="w-full px-3 py-2 text-xs rounded-xl border border-white/12 bg-[#06070A] text-white placeholder-white/25 focus:outline-none focus:border-amber-400 font-['IBM_Plex_Mono',monospace] transition-colors resize-none leading-relaxed"
             ></textarea>
 
-            <!-- Starter Template Chips for Non-Technical Users -->
-            <div class="mt-2.5 space-y-1.5">
-              <div class="flex items-center gap-1.5 text-[11px] text-white/40 font-medium">
-                <Lightbulb size={12} class="text-amber-400" />
-                <span>Click a starter example:</span>
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                {#each mode === 'create' ? createPromptTemplates : refinePromptTemplates as tmpl}
-                  <button
-                    type="button"
-                    onclick={() => (promptText = tmpl.text)}
-                    class="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-amber-500/20 hover:text-amber-300 border border-white/10 hover:border-amber-500/30 text-[11px] text-white/70 transition-colors cursor-pointer"
-                  >
-                    {tmpl.label}
-                  </button>
-                {/each}
-              </div>
+            <!-- Starter Chips -->
+            <div class="flex items-center gap-1 overflow-x-auto py-0.5 custom-scrollbar">
+              {#each mode === 'create' ? createPromptTemplates : refinePromptTemplates as tmpl}
+                <button
+                  type="button"
+                  onclick={() => (promptText = tmpl.text)}
+                  class="px-2 py-0.5 rounded-md bg-white/[0.04] hover:bg-amber-400/15 hover:text-amber-300 border border-white/10 hover:border-amber-400/30 text-[10px] text-white/60 transition-colors cursor-pointer shrink-0"
+                >
+                  {tmpl.label}
+                </button>
+              {/each}
             </div>
           </div>
 
-          <!-- Error Message Display -->
+          <!-- Error Alert -->
           {#if errorMessage}
-            <div class="p-3 text-xs rounded-xl bg-red-500/10 text-red-300 border border-red-500/30 font-['IBM_Plex_Mono',monospace]">
+            <div class="p-2.5 text-[11px] rounded-lg bg-red-500/10 text-red-300 border border-red-500/25 font-['IBM_Plex_Mono',monospace]">
               {errorMessage}
             </div>
           {/if}
 
-          <!-- Live Streaming Code Preview -->
+          <!-- Live Code Stream Preview -->
           {#if streamedText || isGenerating || sanitizedCode}
-            <div class="space-y-1.5">
-              <div class="flex items-center justify-between text-xs text-white/60 font-semibold">
-                <span>Generated Mermaid Code:</span>
+            <div class="space-y-1">
+              <div class="flex items-center justify-between text-[11px] text-white/60">
+                <span>Mermaid Preview</span>
                 {#if isGenerating}
-                  <span class="flex items-center gap-1.5 text-amber-400 font-['IBM_Plex_Mono',monospace] text-[11px]">
-                    <Loader2 class="w-3.5 h-3.5 animate-spin" /> Streaming response...
+                  <span class="text-amber-400 font-['IBM_Plex_Mono',monospace] flex items-center gap-1">
+                    <Loader2 size={11} class="animate-spin" /> Generating...
                   </span>
                 {:else}
-                  <span class="text-emerald-400 font-['IBM_Plex_Mono',monospace] text-[11px] flex items-center gap-1">
-                    <Check size={12} /> Ready to apply
+                  <span class="text-emerald-400 font-['IBM_Plex_Mono',monospace] flex items-center gap-1">
+                    <Check size={11} /> Ready
                   </span>
                 {/if}
               </div>
-              <pre class="p-3 rounded-xl bg-[#0A0B0E] border border-white/15 font-['IBM_Plex_Mono',monospace] text-xs overflow-x-auto max-h-40 whitespace-pre-wrap text-emerald-300 leading-relaxed">
-{sanitizedCode || streamedText}
-              </pre>
+              <pre class="p-2.5 rounded-xl bg-black/60 border border-white/10 font-['IBM_Plex_Mono',monospace] text-[11px] overflow-x-auto max-h-32 whitespace-pre-wrap text-emerald-300 leading-normal">{sanitizedCode || streamedText}</pre>
             </div>
           {/if}
         </div>
 
-        <!-- Footer Action Buttons -->
-        <div class="flex items-center justify-between pt-4 border-t border-white/10 shrink-0">
-          {#if sanitizedCode || streamedText}
-            <button
-              type="button"
-              onclick={() => {
-                streamedText = '';
-                sanitizedCode = '';
-                errorMessage = '';
-              }}
-              class="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1.5 transition-colors cursor-pointer font-['IBM_Plex_Mono',monospace]"
-            >
-              <RefreshCw class="w-3.5 h-3.5" /> Start Over / Try Another
-            </button>
-          {:else}
-            <div class="flex items-center gap-3">
+        <!-- Footer -->
+        <div class="flex items-center justify-between pt-3 mt-2 border-t border-white/10 shrink-0">
+          <div>
+            {#if sanitizedCode || streamedText}
+              <button
+                type="button"
+                onclick={() => {
+                  streamedText = '';
+                  sanitizedCode = '';
+                  errorMessage = '';
+                }}
+                class="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors cursor-pointer font-['IBM_Plex_Mono',monospace]"
+              >
+                <RefreshCw size={11} /> Reset
+              </button>
+            {:else}
               <button
                 type="button"
                 onclick={() => {
                   handleClose();
                   onOpenSettings();
                 }}
-                class="text-xs text-white/50 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                class="text-[11px] text-white/40 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
               >
-                <Settings class="w-3.5 h-3.5" /> Key Settings
+                <Settings size={11} /> API Keys
               </button>
-
-              <button
-                type="button"
-                onclick={() => (isConnectAiOpen = true)}
-                class="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1.5 transition-colors cursor-pointer font-bold"
-              >
-                <Zap class="w-3.5 h-3.5" /> Connect ChatGPT / Gemini / Claude
-              </button>
-            </div>
-          {/if}
+            {/if}
+          </div>
 
           <div class="flex items-center gap-2">
             <button
               type="button"
               onclick={handleClose}
-              class="px-4 py-2 text-xs font-semibold rounded-xl border border-white/15 hover:bg-white/10 text-white/80 transition-colors cursor-pointer"
+              class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-white/10 hover:bg-white/10 text-white/70 transition-colors cursor-pointer"
             >
               Cancel
             </button>
@@ -478,27 +423,28 @@
                 type="button"
                 onclick={handleApply}
                 disabled={isApplying || isGenerating}
-                class="px-5 py-2 text-xs font-bold rounded-xl bg-emerald-500 text-black hover:bg-emerald-400 disabled:opacity-50 flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
+                class="px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-500 text-black hover:bg-emerald-400 disabled:opacity-50 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
               >
                 {#if isApplying}
-                  <Loader2 class="w-3.5 h-3.5 animate-spin" /> Applying...
+                  <Loader2 size={12} class="animate-spin" />
                 {:else}
-                  <Check class="w-3.5 h-3.5" />
-                  <span>{mode === 'create' ? 'Create Diagram' : 'Apply to Editor'}</span>
+                  <Check size={12} strokeWidth={2.5} />
                 {/if}
+                <span>{mode === 'create' ? 'Create Diagram' : 'Apply Changes'}</span>
               </button>
             {:else}
               <button
                 type="button"
                 onclick={handleGenerate}
                 disabled={isGenerating || !promptText.trim()}
-                class="px-5 py-2 text-xs font-bold rounded-xl bg-white text-black hover:bg-slate-200 disabled:opacity-50 flex items-center gap-1.5 transition-colors shadow-md cursor-pointer"
+                class="px-4 py-1.5 text-xs font-bold rounded-lg bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-40 flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
               >
                 {#if isGenerating}
-                  <Loader2 class="w-3.5 h-3.5 animate-spin" /> Generating...
+                  <Loader2 size={12} class="animate-spin text-black" />
+                  <span>Generating...</span>
                 {:else}
-                  <Play class="w-3.5 h-3.5 fill-black" />
-                  <span>Generate Diagram</span>
+                  <Play size={11} class="fill-black" />
+                  <span>Generate</span>
                 {/if}
               </button>
             {/if}
@@ -508,5 +454,3 @@
     </div>
   </div>
 {/if}
-
-<ConnectAiModal bind:isOpen={isConnectAiOpen} />
