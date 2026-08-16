@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createSupabaseServerClient } from '$lib/supabase/server';
+import { generateMcpToken, createAuthCode } from '$lib/server/mcpAuth';
 import crypto from 'crypto';
 
 const corsHeaders = {
@@ -118,7 +119,7 @@ function buildConsentPage(params: {
     <div class="logo">📊</div>
     <h1>Authorize TxtGrph</h1>
     <p class="subtitle">
-      <span class="app-name">${escapeHtml(clientId || 'An application')}</span>
+      <span class="app-name">${escapeHtml(clientId || 'Gemini Connected App')}</span>
       wants to access your TxtGrph workspace.
     </p>
 
@@ -211,12 +212,13 @@ export const GET: RequestHandler = async (event) => {
 };
 
 // POST: Process consent form (approve or deny)
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
+  const { request } = event;
   const formData = await request.formData();
   const action = formData.get('action') as string;
   const redirectUri = formData.get('redirect_uri') as string;
   const state = formData.get('state') as string;
-  const code = formData.get('code') as string;
+  const clientId = formData.get('client_id') as string;
 
   if (!redirectUri) {
     return json(
@@ -229,7 +231,26 @@ export const POST: RequestHandler = async ({ request }) => {
     const redirectUrl = new URL(redirectUri);
 
     if (action === 'approve') {
-      redirectUrl.searchParams.set('code', code || generateAuthCode());
+      const supabase = createSupabaseServerClient(event);
+      const { data: { user } } = await supabase.auth.getUser();
+
+      let rawToken = '';
+      if (user) {
+        const tokenData = generateMcpToken();
+        rawToken = tokenData.rawToken;
+        const appLabel = clientId ? `Gemini Connected App (${clientId.slice(0, 16)})` : 'Gemini Connected App';
+
+        await supabase.from('mcp_tokens').insert({
+          user_id: user.id,
+          name: appLabel,
+          token_hash: tokenData.tokenHash,
+          token_prefix: tokenData.tokenPrefix,
+          scopes: ['read', 'write', 'mcp'],
+        });
+      }
+
+      const authCode = user && rawToken ? createAuthCode(rawToken, user.id) : generateAuthCode();
+      redirectUrl.searchParams.set('code', authCode);
       if (state) redirectUrl.searchParams.set('state', state);
     } else {
       redirectUrl.searchParams.set('error', 'access_denied');

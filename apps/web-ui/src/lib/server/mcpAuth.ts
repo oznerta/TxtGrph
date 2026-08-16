@@ -1,5 +1,7 @@
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, createHmac } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+
+const AUTH_CODE_SECRET = process.env.AUTH_CODE_SECRET || 'txtgrph_oauth_code_signing_secret_key_2026';
 
 export interface AuthenticatedUser {
   userId: string;
@@ -24,6 +26,35 @@ export function generateMcpToken(): { rawToken: string; tokenHash: string; token
   const tokenHash = hashToken(rawToken);
   const tokenPrefix = rawToken.slice(0, 20); // 'txtgrph_mcp_' + 8 hex chars
   return { rawToken, tokenHash, tokenPrefix };
+}
+
+/**
+ * Creates an HMAC-signed stateless authorization code containing the user's raw token.
+ */
+export function createAuthCode(rawToken: string, userId: string): string {
+  const payload = JSON.stringify({ token: rawToken, user: userId, exp: Date.now() + 10 * 60 * 1000 });
+  const b64 = Buffer.from(payload).toString('base64url');
+  const sig = createHmac('sha256', AUTH_CODE_SECRET).update(b64).digest('base64url');
+  return `txtgrph_ac_${b64}.${sig}`;
+}
+
+/**
+ * Verifies and decodes an HMAC-signed authorization code.
+ */
+export function verifyAuthCode(code: string): { token: string; user: string } | null {
+  if (!code || !code.startsWith('txtgrph_ac_')) return null;
+  const rest = code.substring(11);
+  const [b64, sig] = rest.split('.');
+  if (!b64 || !sig) return null;
+  const expectedSig = createHmac('sha256', AUTH_CODE_SECRET).update(b64).digest('base64url');
+  if (sig !== expectedSig) return null;
+  try {
+    const data = JSON.parse(Buffer.from(b64, 'base64url').toString('utf-8'));
+    if (data.exp && Date.now() > data.exp) return null;
+    return { token: data.token, user: data.user };
+  } catch {
+    return null;
+  }
 }
 
 /**

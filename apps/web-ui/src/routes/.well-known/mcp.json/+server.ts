@@ -30,6 +30,7 @@ export const GET: RequestHandler = async ({ url }) => {
         type: 'oauth2',
         authorization_url: `${origin}/api/v1/oauth/authorize`,
         token_url: `${origin}/api/v1/oauth/token`,
+        registration_url: `${origin}/api/v1/oauth/register`,
         scopes: ['mcp', 'read', 'write']
       }
     },

@@ -10,7 +10,7 @@ function getCorsHeaders(origin: string) {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type, Client-Id, Client-Secret, X-Txtgrph-Api-Key',
     'Access-Control-Max-Age': '86400',
-    'WWW-Authenticate': `Bearer realm="txtgrph", authorization_uri="${origin}/api/v1/oauth/authorize", token_uri="${origin}/api/v1/oauth/token"`
+    'WWW-Authenticate': `Bearer realm="txtgrph", authorization_uri="${origin}/api/v1/oauth/authorize", token_uri="${origin}/api/v1/oauth/token", registration_uri="${origin}/api/v1/oauth/register"`
   };
 }
 
@@ -36,6 +36,7 @@ export const GET: RequestHandler = async (event) => {
           issuer: origin,
           authorization_endpoint: `${origin}/api/v1/oauth/authorize`,
           token_endpoint: `${origin}/api/v1/oauth/token`,
+          registration_endpoint: `${origin}/api/v1/oauth/register`,
           userinfo_endpoint: `${origin}/api/v1/oauth/userinfo`
         }
       },

@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createSupabaseServerClient } from '$lib/supabase/server';
-import { hashToken } from '$lib/server/mcpAuth';
+import { hashToken, verifyAuthCode } from '$lib/server/mcpAuth';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,21 +75,36 @@ export const POST: RequestHandler = async (event) => {
   const clientSecret = bodyClientSecret || basicClientSecret || headerSecret;
 
   // ================================================================
-  // authorization_code grant (used by Gemini Spark account linking)
+  // authorization_code grant (used by Gemini and OAuth clients)
   // ================================================================
   if (grantType === 'authorization_code') {
-    // The client_secret from Gemini IS the user's MCP API key.
-    // We return it as the access_token so subsequent Bearer auth works.
-    const accessToken = clientSecret?.trim() || bodyCode || '';
+    let accessToken = '';
+
+    if (bodyCode) {
+      const verified = verifyAuthCode(bodyCode.trim());
+      if (verified?.token) {
+        accessToken = verified.token;
+      } else if (bodyCode.startsWith('txtgrph_mcp_')) {
+        accessToken = bodyCode.trim();
+      }
+    }
+
+    if (!accessToken && clientSecret?.trim() && clientSecret.startsWith('txtgrph_mcp_')) {
+      accessToken = clientSecret.trim();
+    }
+
+    if (!accessToken) {
+      accessToken = clientSecret?.trim() || bodyCode?.trim() || '';
+    }
 
     if (!accessToken) {
       return new Response(
-        JSON.stringify({ error: 'invalid_request', error_description: 'Missing credentials' }),
+        JSON.stringify({ error: 'invalid_grant', error_description: 'Missing or invalid authorization code' }),
         { status: 400, headers: corsHeaders }
       );
     }
 
-    // Optionally verify the key against the database (best-effort, non-blocking)
+    // Best-effort token activity touch
     try {
       const supabase = createSupabaseServerClient(event);
       const tokenHash = hashToken(accessToken);

@@ -19,11 +19,14 @@ export const GET: RequestHandler = async ({ url }) => {
       issuer: origin,
       authorization_endpoint: `${origin}/api/v1/oauth/authorize`,
       token_endpoint: `${origin}/api/v1/oauth/token`,
+      registration_endpoint: `${origin}/api/v1/oauth/register`,
       userinfo_endpoint: `${origin}/api/v1/oauth/userinfo`,
       response_types_supported: ['code', 'token'],
-      grant_types_supported: ['client_credentials', 'authorization_code', 'refresh_token'],
-      token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post', 'none'],
-      scopes_supported: ['read', 'write', 'mcp']
+      grant_types_supported: ['authorization_code', 'client_credentials', 'refresh_token'],
+      token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
+      code_challenge_methods_supported: ['S256', 'plain'],
+      scopes_supported: ['read', 'write', 'mcp'],
+      service_documentation: `${origin}/settings`
     },
     { headers: corsHeaders }
   );
