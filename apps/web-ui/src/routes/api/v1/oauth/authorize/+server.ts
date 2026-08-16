@@ -249,7 +249,7 @@ export const POST: RequestHandler = async (event) => {
         });
       }
 
-      const authCode = user && rawToken ? createAuthCode(rawToken, user.id) : generateAuthCode();
+      const authCode = user && rawToken ? createAuthCode(rawToken, user.id, user.email) : generateAuthCode();
       redirectUrl.searchParams.set('code', authCode);
       if (state) redirectUrl.searchParams.set('state', state);
     } else {

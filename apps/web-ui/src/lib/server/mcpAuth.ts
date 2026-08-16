@@ -29,10 +29,15 @@ export function generateMcpToken(): { rawToken: string; tokenHash: string; token
 }
 
 /**
- * Creates an HMAC-signed stateless authorization code containing the user's raw token.
+ * Creates an HMAC-signed stateless authorization code containing the user's raw token and metadata.
  */
-export function createAuthCode(rawToken: string, userId: string): string {
-  const payload = JSON.stringify({ token: rawToken, user: userId, exp: Date.now() + 10 * 60 * 1000 });
+export function createAuthCode(rawToken: string, userId: string, email?: string): string {
+  const payload = JSON.stringify({
+    token: rawToken,
+    user: userId,
+    email: email || 'user@txtgrph.app',
+    exp: Date.now() + 15 * 60 * 1000
+  });
   const b64 = Buffer.from(payload).toString('base64url');
   const sig = createHmac('sha256', AUTH_CODE_SECRET).update(b64).digest('base64url');
   return `txtgrph_ac_${b64}.${sig}`;
@@ -41,7 +46,7 @@ export function createAuthCode(rawToken: string, userId: string): string {
 /**
  * Verifies and decodes an HMAC-signed authorization code.
  */
-export function verifyAuthCode(code: string): { token: string; user: string } | null {
+export function verifyAuthCode(code: string): { token: string; user: string; email?: string } | null {
   if (!code || !code.startsWith('txtgrph_ac_')) return null;
   const rest = code.substring(11);
   const [b64, sig] = rest.split('.');
@@ -51,10 +56,32 @@ export function verifyAuthCode(code: string): { token: string; user: string } | 
   try {
     const data = JSON.parse(Buffer.from(b64, 'base64url').toString('utf-8'));
     if (data.exp && Date.now() > data.exp) return null;
-    return { token: data.token, user: data.user };
+    return { token: data.token, user: data.user, email: data.email };
   } catch {
     return null;
   }
+}
+
+/**
+ * Generates an OpenID Connect compliant signed JWT ID Token for Google Gemini / OAuth clients.
+ */
+export function createIdToken(userId: string, userEmail: string, origin: string, clientId: string): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const payload = Buffer.from(
+    JSON.stringify({
+      iss: origin,
+      sub: userId,
+      aud: clientId,
+      exp: now + 365 * 24 * 60 * 60,
+      iat: now,
+      email: userEmail || 'user@txtgrph.app',
+      email_verified: true,
+      name: 'TxtGrph User'
+    })
+  ).toString('base64url');
+  const sig = createHmac('sha256', AUTH_CODE_SECRET).update(`${header}.${payload}`).digest('base64url');
+  return `${header}.${payload}.${sig}`;
 }
 
 /**

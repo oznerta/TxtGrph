@@ -14,7 +14,7 @@ export const OPTIONS: RequestHandler = async () => {
   return new Response(null, { status: 200, headers: corsHeaders });
 };
 
-export const GET: RequestHandler = async (event) => {
+async function handleUserInfo(event: Parameters<RequestHandler>[0]) {
   const supabase = createSupabaseServerClient(event);
   const authUser = await authenticateMcpRequest(event.request, supabase);
 
@@ -22,13 +22,34 @@ export const GET: RequestHandler = async (event) => {
     return json({ error: 'unauthorized' }, { status: 401, headers: corsHeaders });
   }
 
+  let email = 'user@txtgrph.app';
+  let name = 'TxtGrph User';
+
+  try {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', authUser.userId)
+      .maybeSingle();
+
+    if (profile?.full_name) {
+      name = profile.full_name;
+    }
+  } catch {
+    // best-effort
+  }
+
   return json(
     {
       sub: authUser.userId,
-      name: 'TxtGrph User',
-      email: 'user@txtgrph.app',
+      name: name,
+      email: email,
+      email_verified: true,
       updated_at: new Date().toISOString()
     },
     { headers: corsHeaders }
   );
-};
+}
+
+export const GET: RequestHandler = handleUserInfo;
+export const POST: RequestHandler = handleUserInfo;

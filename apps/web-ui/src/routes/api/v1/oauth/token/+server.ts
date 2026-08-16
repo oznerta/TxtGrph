@@ -1,14 +1,16 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createSupabaseServerClient } from '$lib/supabase/server';
-import { hashToken, verifyAuthCode } from '$lib/server/mcpAuth';
+import { hashToken, verifyAuthCode, createIdToken } from '$lib/server/mcpAuth';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, Client-Id, Client-Secret, X-Txtgrph-Api-Key',
   'Access-Control-Max-Age': '86400',
-  'Content-Type': 'application/json'
+  'Content-Type': 'application/json',
+  'Cache-Control': 'no-store',
+  'Pragma': 'no-cache'
 };
 
 export const OPTIONS: RequestHandler = async () => {
@@ -17,6 +19,7 @@ export const OPTIONS: RequestHandler = async () => {
 
 export const POST: RequestHandler = async (event) => {
   const request = event.request;
+  const origin = event.url.origin;
 
   // --- Parse all possible credential sources ---
   let basicClientId: string | null = null;
@@ -42,6 +45,7 @@ export const POST: RequestHandler = async (event) => {
   let bodyClientId: string | null = null;
   let bodyClientSecret: string | null = null;
   let bodyCode: string | null = null;
+  let bodyRefreshToken: string | null = null;
 
   try {
     const contentType = request.headers.get('Content-Type') || '';
@@ -51,12 +55,14 @@ export const POST: RequestHandler = async (event) => {
       bodyClientId = (formData.get('client_id') as string) || null;
       bodyClientSecret = (formData.get('client_secret') as string) || null;
       bodyCode = (formData.get('code') as string) || null;
+      bodyRefreshToken = (formData.get('refresh_token') as string) || null;
     } else {
       const body = await request.json();
       bodyGrantType = body.grant_type || null;
       bodyClientId = body.client_id || null;
       bodyClientSecret = body.client_secret || null;
       bodyCode = body.code || null;
+      bodyRefreshToken = body.refresh_token || null;
     }
   } catch {
     // ignore parse errors — we'll work with what we have
@@ -71,7 +77,7 @@ export const POST: RequestHandler = async (event) => {
 
   // Resolve final values
   const grantType = bodyGrantType || 'authorization_code';
-  const clientId = bodyClientId || basicClientId || 'txtgrph';
+  const clientId = bodyClientId || basicClientId || 'gemini';
   const clientSecret = bodyClientSecret || basicClientSecret || headerSecret;
 
   // ================================================================
@@ -79,11 +85,15 @@ export const POST: RequestHandler = async (event) => {
   // ================================================================
   if (grantType === 'authorization_code') {
     let accessToken = '';
+    let userId = 'user';
+    let userEmail = 'user@txtgrph.app';
 
     if (bodyCode) {
       const verified = verifyAuthCode(bodyCode.trim());
       if (verified?.token) {
         accessToken = verified.token;
+        userId = verified.user || userId;
+        userEmail = verified.email || userEmail;
       } else if (bodyCode.startsWith('txtgrph_mcp_')) {
         accessToken = bodyCode.trim();
       }
@@ -113,12 +123,44 @@ export const POST: RequestHandler = async (event) => {
       // Verification is best-effort — don't block the token exchange
     }
 
+    const idToken = createIdToken(userId, userEmail, origin, clientId);
+
     return new Response(
       JSON.stringify({
         access_token: accessToken,
         token_type: 'Bearer',
         expires_in: 31536000,
-        scope: 'mcp read write'
+        refresh_token: accessToken,
+        id_token: idToken,
+        scope: 'mcp read write openid profile email'
+      }),
+      { status: 200, headers: corsHeaders }
+    );
+  }
+
+  // ================================================================
+  // refresh_token grant (used by Google to maintain offline access)
+  // ================================================================
+  if (grantType === 'refresh_token') {
+    const rawToken = bodyRefreshToken || clientSecret || bodyCode || '';
+    if (!rawToken || !rawToken.trim()) {
+      return new Response(
+        JSON.stringify({ error: 'invalid_request', error_description: 'Missing refresh_token' }),
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    const cleanToken = rawToken.trim();
+    const idToken = createIdToken('user', 'user@txtgrph.app', origin, clientId);
+
+    return new Response(
+      JSON.stringify({
+        access_token: cleanToken,
+        token_type: 'Bearer',
+        expires_in: 31536000,
+        refresh_token: cleanToken,
+        id_token: idToken,
+        scope: 'mcp read write openid profile email'
       }),
       { status: 200, headers: corsHeaders }
     );
@@ -150,7 +192,8 @@ export const POST: RequestHandler = async (event) => {
             access_token: cleanSecret,
             token_type: 'Bearer',
             expires_in: 31536000,
-            scope: 'mcp read write'
+            refresh_token: cleanSecret,
+            scope: 'mcp read write openid profile email'
           }),
           { status: 200, headers: corsHeaders }
         );
@@ -169,7 +212,8 @@ export const POST: RequestHandler = async (event) => {
             access_token: cleanSecret,
             token_type: 'Bearer',
             expires_in: 31536000,
-            scope: 'mcp read write'
+            refresh_token: cleanSecret,
+            scope: 'mcp read write openid profile email'
           }),
           { status: 200, headers: corsHeaders }
         );
