@@ -30,16 +30,23 @@ export const GET: RequestHandler = async ({ url }) => {
  * so users never have to manually generate or paste Client ID / Client Secret.
  */
 export const POST: RequestHandler = async ({ request, url }) => {
+  let body: any = {};
   try {
-    let body: any = {};
     const contentType = request.headers.get('Content-Type') || '';
     if (contentType.includes('application/json')) {
       body = await request.json();
     } else if (contentType.includes('application/x-www-form-urlencoded')) {
       const formData = await request.formData();
       body = Object.fromEntries(formData.entries());
+    } else {
+      const text = await request.text();
+      if (text) body = JSON.parse(text);
     }
+  } catch {
+    body = {};
+  }
 
+  try {
     const clientName = (typeof body.client_name === 'string' && body.client_name.trim())
       ? body.client_name.trim()
       : 'Gemini Custom Connected App';

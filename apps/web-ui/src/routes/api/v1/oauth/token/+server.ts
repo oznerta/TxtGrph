@@ -17,6 +17,17 @@ export const OPTIONS: RequestHandler = async () => {
   return new Response(null, { status: 200, headers: corsHeaders });
 };
 
+export const GET: RequestHandler = async () => {
+  return json(
+    {
+      success: true,
+      message: 'TxtGrph OAuth 2.0 Token Endpoint',
+      usage: 'Send a POST request with grant_type, code, client_id, and client_secret to exchange an authorization code for an access token.'
+    },
+    { headers: corsHeaders }
+  );
+};
+
 export const POST: RequestHandler = async (event) => {
   const request = event.request;
   const origin = event.url.origin;
