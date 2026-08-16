@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Sparkles, Loader2, Play, Check, X, Settings, Cpu, Wrench, RefreshCw, Lightbulb } from 'lucide-svelte';
+  import { Sparkles, Loader2, Play, Check, X, Settings, Cpu, RefreshCw } from 'lucide-svelte';
   import { createSupabaseBrowserClient } from '$lib/supabase/client';
   import { decryptApiKey } from '$lib/crypto';
   import { AIRouter } from '@txtgrph/ai-router';
@@ -34,26 +34,22 @@
   let sanitizedCode = $state('');
   let errorMessage = $state('');
 
+  const providerDisplayNames: Record<string, string> = {
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
+    gemini: 'Google Gemini',
+    deepseek: 'DeepSeek',
+    groq: 'Groq',
+    ollama: 'Ollama'
+  };
+
   let providerOptions = $derived.by<SelectOption[]>(() => {
     return userKeys.map((k) => ({
       value: k.provider,
-      label: `${k.provider.toUpperCase()} (${k.key_hint})`,
+      label: providerDisplayNames[k.provider.toLowerCase()] || k.provider.toUpperCase(),
       icon: Cpu
     }));
   });
-
-  const createPromptTemplates = [
-    { label: 'Auth Flow', text: 'Sequence diagram showing user login, password verification, JWT issuance, and dashboard redirect' },
-    { label: 'System Architecture', text: 'Architecture diagram with Client App, API Gateway, Microservices, Redis Cache, and PostgreSQL' },
-    { label: 'Checkout Flow', text: 'Flowchart for e-commerce checkout from cart validation to Stripe payment and order confirmation' },
-    { label: 'Data Pipeline', text: 'Flowchart of a data pipeline from Kafka stream to ETL processing, S3 bucket, and Snowflake warehouse' }
-  ];
-
-  const refinePromptTemplates = [
-    { label: 'Vibrant Colors', text: 'Apply modern vibrant colors, curved edges, and custom stroke styling to all nodes' },
-    { label: 'Error Handling', text: 'Add error handling branches, retry loops, and fallback alert nodes' },
-    { label: 'Descriptive Labels', text: 'Add descriptive labels and notes explaining each processing step in detail' }
-  ];
 
   function resetState() {
     promptText = '';
@@ -241,7 +237,7 @@
       onclick={(e) => e.stopPropagation()}
     >
       <!-- Sleek Minimal Header -->
-      <div class="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
+      <div class="flex items-center justify-between pb-3.5 border-b border-white/10 shrink-0">
         <div class="flex items-center gap-2">
           <div class="w-7 h-7 rounded-lg bg-amber-400/10 border border-amber-400/20 text-amber-400 flex items-center justify-center">
             <Sparkles size={14} />
@@ -308,7 +304,7 @@
           <!-- Compact Provider Selector Row -->
           <div class="flex items-center justify-between text-xs">
             <div class="flex items-center gap-2 w-full">
-              <span class="text-white/50 text-[11px] shrink-0">Model Key:</span>
+              <span class="text-white/50 text-[11px] shrink-0 font-medium">Provider:</span>
               <div class="flex-1">
                 <CustomSelect
                   id="ai-provider-select-box"
@@ -329,28 +325,15 @@
             </div>
           </div>
 
-          <!-- Prompt Textarea -->
-          <div class="space-y-1.5">
+          <!-- Expanded Rich Text Prompt Textarea -->
+          <div class="space-y-1">
             <textarea
               id="ai-prompt-input"
               bind:value={promptText}
-              placeholder={mode === 'create' ? 'e.g. Create a sequence diagram showing user login, JWT issue, and DB lookup...' : 'e.g. Add an error handling branch and highlight failed states in red...'}
-              rows={3}
-              class="w-full px-3 py-2 text-xs rounded-xl border border-white/12 bg-[#06070A] text-white placeholder-white/25 focus:outline-none focus:border-amber-400 font-['IBM_Plex_Mono',monospace] transition-colors resize-none leading-relaxed"
+              placeholder={mode === 'create' ? 'e.g. Create a sequence diagram showing user login, JWT issuance, and database verification...' : 'e.g. Add an error handling branch and highlight failed states in red...'}
+              rows={5}
+              class="w-full px-3.5 py-3 text-xs rounded-xl border border-white/12 bg-[#06070A] text-white placeholder-white/25 focus:outline-none focus:border-amber-400 font-['IBM_Plex_Mono',monospace] transition-colors resize-none leading-relaxed min-h-[110px]"
             ></textarea>
-
-            <!-- Starter Chips -->
-            <div class="flex items-center gap-1 overflow-x-auto py-0.5 custom-scrollbar">
-              {#each mode === 'create' ? createPromptTemplates : refinePromptTemplates as tmpl}
-                <button
-                  type="button"
-                  onclick={() => (promptText = tmpl.text)}
-                  class="px-2 py-0.5 rounded-md bg-white/[0.04] hover:bg-amber-400/15 hover:text-amber-300 border border-white/10 hover:border-amber-400/30 text-[10px] text-white/60 transition-colors cursor-pointer shrink-0"
-                >
-                  {tmpl.label}
-                </button>
-              {/each}
-            </div>
           </div>
 
           <!-- Error Alert -->
@@ -381,7 +364,7 @@
         </div>
 
         <!-- Footer -->
-        <div class="flex items-center justify-between pt-3 mt-2 border-t border-white/10 shrink-0">
+        <div class="flex items-center justify-between pt-3 mt-1 border-t border-white/10 shrink-0">
           <div>
             {#if sanitizedCode || streamedText}
               <button
