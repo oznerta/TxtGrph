@@ -508,20 +508,12 @@
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleFocus);
 
-    // 3. Periodic Background Sync Heartbeat (every 8s when window is active)
-    const pollInterval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        refreshWorkspaceData();
-      }
-    }, 8000);
-
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('popstate', handlePopState);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
-      clearInterval(pollInterval);
       supabase.removeChannel(realtimeChannel);
     };
   });
@@ -1314,7 +1306,7 @@
   }
 </script>
 
-<div class="h-screen w-screen flex bg-[#090A0F] overflow-hidden select-none font-['Instrument_Sans',sans-serif]">
+<div class="h-screen w-full max-w-full flex bg-[#090A0F] overflow-hidden select-none font-['Instrument_Sans',sans-serif]">
   <!-- Left Navigation Sidebar -->
   {#if sidebarOpen && !isCanvasFullscreen}
     <div class="w-64 shrink-0 h-full">
@@ -1350,7 +1342,7 @@
   {/if}
 
   <!-- Main Viewport Content Container -->
-  <main class="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+  <main class="flex-1 min-w-0 w-full flex flex-col min-h-0 overflow-hidden relative">
     {#if workspaceStore.activeDiagramId}
       <DiagramCanvas
         bind:code={workspaceStore.activeCode}

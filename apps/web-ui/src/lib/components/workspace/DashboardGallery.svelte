@@ -262,7 +262,7 @@
 
 <svelte:window onclick={() => (activeMenuFolderId = null)} />
 
-<div class="flex-1 min-h-0 flex flex-col overflow-y-auto bg-[#090A0F] p-6 sm:p-8 space-y-6 select-none relative font-['Instrument_Sans',sans-serif]">
+<div class="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-y-auto overflow-x-hidden bg-[#090A0F] p-6 sm:p-8 space-y-6 select-none relative font-['Instrument_Sans',sans-serif]">
   <!-- Top Hero Header Bar: Breadcrumb + Stats + Action Buttons -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
     <!-- Left: Navigation Breadcrumb & Stats -->

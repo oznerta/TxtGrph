@@ -12,7 +12,7 @@
   />
 </svelte:head>
 
-<div class="min-h-screen bg-[var(--color-surface-app)] text-[var(--color-text-primary)] font-['Public_Sans',sans-serif] antialiased selection:bg-[var(--color-brass)] selection:text-white">
+<div class="min-h-screen w-full max-w-full overflow-x-hidden bg-[var(--color-surface-app)] text-[var(--color-text-primary)] font-['Public_Sans',sans-serif] antialiased selection:bg-[var(--color-brass)] selection:text-white">
   {@render children()}
 </div>
 

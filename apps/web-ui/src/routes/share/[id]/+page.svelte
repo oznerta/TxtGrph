@@ -326,7 +326,7 @@
   </div>
 {/snippet}
 
-<div class="h-screen w-screen flex bg-[#090A0F] overflow-hidden select-none font-['Instrument_Sans',sans-serif]">
+<div class="h-screen w-full max-w-full flex bg-[#090A0F] overflow-hidden select-none font-['Instrument_Sans',sans-serif]">
   <!-- Left Navigation Sidebar (100% Dashboard Parity) -->
   {#if sidebarOpen}
     <div class="w-64 shrink-0 h-full border-r border-white/10 bg-[#000000] flex flex-col select-none text-white/80 font-['Instrument_Sans',sans-serif]">
