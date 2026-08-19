@@ -292,6 +292,95 @@
   let renderError = $state<string | null>(null);
   let isRendering = $state(false);
 
+  let isSyncingWorkspace = $state(false);
+
+  async function refreshWorkspaceData(silent = true) {
+    if (isSyncingWorkspace) return;
+    isSyncingWorkspace = true;
+
+    try {
+      const { data: foldersData, error: foldersErr } = await supabase
+        .from('folders')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      const { data: diagramsData, error: diagramsErr } = await supabase
+        .from('diagrams')
+        .select('*')
+        .order('updated_at', { ascending: false });
+
+      const { data: folderCollabsData } = await supabase
+        .from('folder_collaborators')
+        .select('folder_id');
+
+      const folderCollabCounts = new Map<string, number>();
+      (folderCollabsData || []).forEach((fc: any) => {
+        folderCollabCounts.set(fc.folder_id, (folderCollabCounts.get(fc.folder_id) || 0) + 1);
+      });
+
+      if (!foldersErr && foldersData) {
+        const mappedFolders: Folder[] = foldersData.map((f: any) => {
+          const count = folderCollabCounts.get(f.id) || 0;
+          return {
+            id: f.id,
+            userId: f.user_id,
+            parentId: f.parent_id,
+            organizationId: f.organization_id || null,
+            name: f.name,
+            color: f.color || null,
+            icon: f.icon || null,
+            isShared: f.is_shared || count > 0,
+            shareToken: f.share_token || null,
+            shareUpdatedAt: f.share_updated_at || null,
+            sharedCollaboratorCount: count,
+            isDeleted: f.is_deleted || false,
+            deletedAt: f.deleted_at || null,
+            createdAt: f.created_at,
+            updatedAt: f.updated_at
+          };
+        });
+        workspaceStore.folders = mappedFolders;
+      }
+
+      if (!diagramsErr && diagramsData) {
+        const mappedDiagrams: Diagram[] = diagramsData.map((d: any) => ({
+          id: d.id,
+          userId: d.user_id,
+          folderId: d.folder_id,
+          organizationId: d.organization_id || null,
+          title: d.title,
+          code: d.code,
+          config: d.config || {},
+          isShared: d.is_shared || false,
+          shareToken: d.share_token || null,
+          shareUpdatedAt: d.share_updated_at || null,
+          isDeleted: d.is_deleted || false,
+          deletedAt: d.deleted_at || null,
+          createdAt: d.created_at,
+          updatedAt: d.updated_at
+        }));
+
+        // Preserve active diagram local unsaved code/title while user is actively editing
+        if (workspaceStore.activeDiagramId && workspaceStore.saveStatus === 'unsaved') {
+          const currentCode = workspaceStore.activeCode;
+          const currentTitle = workspaceStore.activeTitle;
+          const activeIdx = mappedDiagrams.findIndex((d) => d.id === workspaceStore.activeDiagramId);
+          if (activeIdx !== -1) {
+            mappedDiagrams[activeIdx].code = currentCode;
+            mappedDiagrams[activeIdx].title = currentTitle;
+          }
+        }
+
+        workspaceStore.diagrams = mappedDiagrams;
+        favoriteIds = new Set(mappedDiagrams.filter((d) => d.isShared).map((d) => d.id));
+      }
+    } catch (err) {
+      if (!silent) console.error('Failed to sync workspace:', err);
+    } finally {
+      isSyncingWorkspace = false;
+    }
+  }
+
   onMount(() => {
     try {
       mermaid.parseError = () => {};
@@ -379,10 +468,61 @@
     };
     window.addEventListener('keydown', handleGlobalKeydown);
 
+    // 1. Supabase Realtime Subscription for zero-click instant updates
+    const realtimeChannel = supabase
+      .channel('txtgrph-workspace-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'diagrams' },
+        () => {
+          refreshWorkspaceData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'folders' },
+        () => {
+          refreshWorkspaceData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'organizations' },
+        () => {
+          loadOrganizations();
+        }
+      )
+      .subscribe();
+
+    // 2. Auto-sync on Tab Visibility Change / Window Focus (e.g. switching back from ChatGPT)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshWorkspaceData();
+        loadOrganizations();
+      }
+    };
+    const handleFocus = () => {
+      refreshWorkspaceData();
+      loadOrganizations();
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    // 3. Periodic Background Sync Heartbeat (every 8s when window is active)
+    const pollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        refreshWorkspaceData();
+      }
+    }, 8000);
+
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('popstate', handlePopState);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(pollInterval);
+      supabase.removeChannel(realtimeChannel);
     };
   });
 
